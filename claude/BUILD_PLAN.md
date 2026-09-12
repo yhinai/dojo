@@ -1,4 +1,6 @@
-# HERD v2 — Full-scope build and verification plan
+# HERD v2 — Final build and verification plan
+
+> **Status: FINAL — September 13, 2026.** Protocol defaults in [protocol.json](protocol.json) (v2) are the executed configuration. The demo is specified in [HERD.md §7](HERD.md#7-the-demo) and built by the work package in §12A below.
 
 > Target: the complete architecture in [ARCHITECTURE.md](ARCHITECTURE.md), retaining five learners, three rounds, cross-agent trials, PACE, skill pooling, retrieval, poisoning controls, Weave, the marimo control room, ARIA analysis, and final multi-arm evaluation.
 >
@@ -143,6 +145,27 @@ Connect learner cards, round timeline, pool browser, notebook comparison, gate d
 
 Separate read-only filters from actions that start paid work. A refresh or slider change cannot submit model calls. Start/resume controls require idempotency keys and display the associated experiment ID.
 
+## 12A. Demo work package
+
+The demo is a product surface with its own artifacts, not an afterthought assembled at noon. Owner: Fable (assembly, recording, control-room demo mode); Astra (round-one recording, gate and trial records, final report). Cross-review the beat sheet against real artifacts the night before.
+
+| Beat | Artifact that must exist | Produced by | Recorded / live |
+|---|---|---|---|
+| Hook — five panels, same failure | Round-one learner cards with actual diagnostics; or ARIA failure-cluster report | Scheduler + Weave + ARIA | recorded |
+| The repair and the lesson | One `AttemptRecord` → repair diff → `LessonRevision` | Learner, repair, distillation | recorded |
+| The gate and the rejected false lesson | One `GateState` with E trajectory; one poisoning-control record with rejection stage | Trial service + curator | recorded |
+| Round timeline | Three `PoolSnapshot` revisions with contributor/recipient links | Scheduler + pool service | recorded, sped up, labeled |
+| **Live split-screen** | A `Demonstration`-partition task; recorded fresh-worker pair; live-launchable passing notebook on an allocated port | Trial service (recording) + broker (live) | **pair recorded if needed; slider probe live** |
+| The numbers | `ExperimentReport` with four arms, paired difference, interval, tokens | Reporting | recorded |
+| Sponsors | One Weave Evaluation page; control room in demo mode; stored ARIA report | Weave outbox, control room, ARIA adapter | live UI, recorded data |
+| Close | Learner cards, final pool revision | Control room | live UI |
+
+**Demo-mode requirements for the control room:** read-only; `mo.ui.refresh` and slider recomputation must not trigger model calls; every panel has a labeled empty/insufficient-evidence state so an honest zero renders cleanly.
+
+**Recording:** capture the full three minutes once the artifacts exist; cut a sub-two-minute version for the submission form. The live slider probe is rehearsed against the exact notebook and port that will be used on stage.
+
+**Do not:** select a different demonstration task after seeing final results without saying so on stage; pad an empty pool; describe an integration that did not run.
+
 ## 13. Final experiment work package
 
 Freeze the final pool, curated-doc summary, raw-memory selection rule, retrieval configuration, worker model, and task manifest before scoring. Run all four arms on the same tasks using new workspaces and conversations.
@@ -202,6 +225,11 @@ Task ID uniqueness, sampler identity binding, no final data in candidate context
 - [ ] Four-arm fresh-worker comparison is executed with raw results and cost reporting.
 - [ ] Same-session retry is not presented as isolated cross-agent transfer.
 - [ ] Demo uses actual outcomes and clearly distinguishes replay from live behavior.
+- [ ] Hook artifact exists: five (or the true number of) learner panels showing the same failure family, recorded.
+- [ ] One repair diff, its lesson record, one gate stream, and the rejected false-lesson record are exportable to the demo.
+- [ ] Demonstration-partition task chosen and its fresh-worker pair recorded; passing notebook launches live; slider probe rehearsed.
+- [ ] Control room demo mode verified: no paid calls on refresh or slider; empty states render.
+- [ ] Backup recording under two minutes attached to the submission.
 - [ ] Research attribution and reused components are documented.
 - [ ] Submission requirements, team surveys, repository access, and recording are complete.
 

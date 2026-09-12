@@ -99,29 +99,66 @@ The headline is intentionally simple. The underlying evaluation also needs:
 
 These are not extra products. They distinguish useful shared learning from more tokens, documentation injection, repeated attempts, or task-answer leakage.
 
-## 7. The corrected demo
+## 7. The demo
 
-> “This worker has never seen the task or the earlier repair. It receives only lessons learned by other agents.”
+Three minutes, strictly enforced, one slide. The demo opens on the **problem in a single image**, not on the system. Every beat below names the artifact it reads, whether it is recorded or live, and what to do if the artifact does not exist. Nothing is promised before it is measured; recorded material is labeled recorded; the illustrative task is labeled illustrative.
 
-Run two independent fresh sessions on a held-out task and identical fixture. One receives no shared lessons; the other receives the admitted pool through the same retriever and context budget policy. Neither can inspect the other's workspace or result.
+### The hook
 
-If the no-pool arm fails and the pool arm succeeds, show the notebook responding correctly to a new UI input. Then reveal the small lesson and its origin/evaluation record. Do not paste the completed training notebook into the worker's context.
+Five agents, five separate sessions, the same tool, the same mistake — stacked on one screen. Then one sentence.
 
-A separate same-worker retry can illustrate the mechanics, but label it as recovery and do not use it as the transfer evidence.
+> **"Five agents. Same tool. Same mistake. None of them can tell the others."**
 
-### Three-minute presentation
+That image is the entire problem statement, and it is *true of every multi-agent deployment in this room*. It takes eight seconds and requires no explanation of HERD.
 
-| Time | Visible evidence |
+### Beat sheet
+
+| Time | Beat | On screen | Source | Fallback |
+|---|---|---|---|---|
+| **0:00–0:08** | **The hook.** Say the line. Nothing else. | Five learner panels from round one, each showing the same marimo diagnostic on a structurally similar task (the duplicate-global collision, or whichever failure actually recurred). Actual diagnostics, actual timestamps, labeled *recorded, round 1*. | Round-1 event log; the control room's learner cards | If fewer than five learners hit the same failure, show the largest cluster ARIA identified ("3 of 5 agents, same failure family") — still the same sentence, with the true number. |
+| **0:08–0:30** | **One of them figured it out.** | Learner 2's repair diff — before/after, a few lines — then the distilled lesson card: trigger, instruction, *does not apply*, origin. | `LessonRevision` record + repair diff from the event log | If no lesson was distilled, show the repair diff alone and say the distillation step honestly did not fire. |
+| **0:30–0:50** | **The pool didn't just take its word for it.** | The gate view for that candidate: wins / losses / ties, E climbing past the threshold, the regression controls all green, **and right beside it the rejected false lesson** — *"cells must be ordered top to bottom"* — with its stage of rejection named. | `GateState` + `TrialRecord`; the labeled poisoning-control record | If no candidate crossed the gate, show the closest stream with its E value and say "insufficient evidence — it stayed in quarantine." That is the system working. |
+| **0:50–1:05** | **Round timeline.** Fifteen seconds, sped up, labeled *recorded*. Three rounds, pool revisions appearing, who contributed, who received. | Three-round timeline panel, `PoolSnapshot` diffs | — |
+| **1:05–2:05** | **THE LIVE BEAT — split screen, two fresh workers.** *"This worker has never seen the task, the repair, or the other agents. Left: no lessons. Right: only lessons other agents learned."* Same held-out task, same fixture, same budget, independent sessions. Show the two notebooks side by side. Then **drag the slider on the right-hand notebook live** — the table refilters correctly. | §4.3-style fresh-worker pair on a *Demonstration*-partition task; live `preview_notebook` on the passing arm | **Recorded pair + live probe.** If two model attempts can't finish in the slot, play the recorded pair (labeled) and run only the slider interaction live — the interaction is the part that proves the notebook actually works. If the pool arm failed on this task, say so and show the aggregate instead. Never swap in a different task after the fact without saying so. |
+| **2:05–2:35** | **The numbers.** *"That was one task, chosen to be illustrative. Here is all of them."* | Final four-arm panel: passed/total per arm, the paired admitted-pool-minus-no-pool difference with its interval, tokens per arm. **Say the curated-docs number out loud** — it is the baseline a skeptic reaches for first. | `ExperimentReport` | If the lift is zero or negative, show it as zero or negative. Then say what the run *did* establish: the admission machinery, the rejected false lesson, the cost. |
+| **2:35–2:50** | **Sponsors in one breath.** *"Every attempt, repair, trial, and admission is a Weave evaluation row; the control room you're looking at is a marimo notebook; ARIA read the round summaries and flagged the failure cluster you saw at the top."* | One Weave evaluation page, the control room itself, the stored ARIA report | If ARIA access never materialized, drop the clause. Do not describe an integration that did not run. |
+| **2:50–3:00** | **Close.** Return to the five-panel image from the hook, now with the pool revision number next to each learner. | Learner cards, final state | — |
+
+> **"One agent struggles. Every agent learns."**
+
+### The one slide
+
+Title: **HERD — One agent struggles. Every agent learns.**
+Body, four lines:
+1. Five learners · three rounds · marimo · verified repairs → scoped lessons
+2. Lessons **earn** the pool: fresh paired trials, sequential gate (α = 0.05), regression controls, false-lesson rejection
+3. Headline: fresh-worker success, admitted pool vs no pool — *[the real number, with n and interval]*
+4. Built on: marimo, W&B Weave (Evaluation + Leaderboard), W&B Inference, ARIA. Reused: ACE lesson format, PACE gate construction.
+
+Line 4 is deliberate. Naming foundations reads as maturity and pre-empts "what did you build?"
+
+### Pre-answered questions
+
+| Question | Answer, cold |
 |---|---|
-| 0:00–0:20 | A recorded development failure and the real diagnostic. State the repeated-learning problem. |
-| 0:20–0:45 | Actual repair diff, distilled lesson, and its source learner. |
-| 0:45–1:05 | Admission evidence and one clearly labeled rejected false lesson. |
-| 1:05–1:30 | Five-agent, three-round replay with actual pool revisions. Show who contributed and who benefited. |
-| 1:30–2:15 | Fresh-worker comparison: independent sessions, same new task, different lesson access. Run a bounded interaction live. |
-| 2:15–2:40 | Held-out success counts, documentation baseline, and cost. Show measured results rather than promised gains. |
-| 2:40–3:00 | Weave evidence link, marimo app, and the closing line. |
+| *"Isn't this just more context?"* | "Four arms, same envelope cap. Curated docs got the same 2,000 tokens; raw memory got the same 2,000 tokens. Here are the three numbers side by side." |
+| *"How do you know the lesson caused it?"* | "We never credit a lesson from an episode that happened to retrieve it. Only paired fresh-session trials, with and without, count as evidence — and it has to clear a sequential test that bounds false admission at 5%." |
+| *"What if the model already knows marimo?"* | "Then the lift is zero and we show zero. We calibrated task families first so the worker measurably fails; where it didn't, that family isn't in the headline." |
+| *"What did you build versus reuse?"* | Point at slide line 4. "The lesson format is ACE's, the gate construction is PACE's. The broker isolation, the behavioral oracle, the paired trial service, the pool transactions, the four-arm evaluation, and the control room are ours." |
+| *"Would it catch a bad lesson you didn't plant?"* | "The regression controls are behavioral — a lesson that breaks clean tasks fails them regardless of why. The planted false lesson tests that path; the fixed controls run on every candidate." |
+| *"Why only five and three?"* | "Because every admission is 64 fresh paired episodes and we report every one. Five and three is what we can run honestly before 1pm, not what the architecture caps at." |
 
-The comparison should be recorded from actual runs if both model attempts cannot finish inside the live slot. A fresh input interaction can remain live. Label replay and live content explicitly.
+### What must be true for the demo to exist
+
+Listed in dependency order; each is a line in the build plan's demo work package.
+
+1. A round-one recording exists with at least three learners hitting the same failure family — or ARIA's cluster report, if fewer.
+2. At least one repair diff and its distilled lesson record.
+3. At least one gate stream with a visible E trajectory, and the rejected false-lesson record with its named rejection stage.
+4. A *Demonstration*-partition task with a recorded fresh-worker pair, and a live-launchable copy of the passing notebook.
+5. The final four-arm report, whatever it says.
+6. The control room running in read-only demo mode, with refresh disabled from triggering paid calls.
+7. A backup screen recording of the whole three minutes, under two minutes long, for the submission form.
 
 ## 8. Sponsor story
 
