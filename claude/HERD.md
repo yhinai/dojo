@@ -174,7 +174,8 @@ Herd's detectors therefore key on the **action surface**: the tool-call sequence
 | Role | Job | Notes |
 |---|---|---|
 | **Red** | Pass the verifier without solving the task | Retries with feedback from its own failed attempts |
-| **Fixer** | Patch the hole; decide whether the patch is general | Only general patches reach the pool |
+| **Fixer** | Patch the hole | It does **not** decide generality — that is earned by trial, see [GENERALITY.md](GENERALITY.md) |
+| **Trial** | Apply a candidate patch to *k* dissimilar hosts; measure efficacy + non-interference | The gate on pool membership |
 | **Solver** | Confirm legitimate work still passes | The regression guard — without it, the Fixer just breaks the task |
 | **PACE gate** | Decide whether a patch is actually an improvement | Sequential, anytime-valid |
 | **Replay** | Re-run the *specific* prior exploit against the new patch | If it still lands, reject the patch **even though Solver passed** |
@@ -371,7 +372,7 @@ Do not rebuild these.
 
 ## 11. Open questions
 
-1. **What is "general"?** The Fixer decides whether a patch belongs in the pool. Get this wrong in one direction and the pool fills with task-specific noise; wrong in the other and nothing propagates. harden-v0's prompt says *"must NOT contain any specifics of this task; when in doubt, do not push."* Is an LLM judgement enough, or does it need a structural check?
+1. ~~**What is "general"?**~~ **Solved — see [GENERALITY.md](GENERALITY.md).** Generality is not a property of the patch text but an empirical property of its behaviour on other agents' verifiers. A patch earns pool membership through a clinical trial: deterministic admissibility filter → trial on *k* dissimilar hosts measuring efficacy against a **re-derived** attack plus non-interference against each host's own solver → the same sequential e-process gate used by the local loop → ongoing revalidation with retraction. The pool is typed by capability, so generality is *relative* to a capability set rather than absolute.
 2. **Does immunity transfer across *domains*, or only within one?** A timing-hardening defense from a CUDA task plausibly protects a Terraform task. A Checkov-specific one does not. Measuring cross-domain transfer would be the strongest possible result — and the most likely to fail.
 3. **Does the colony converge or collapse?** Diversity collapse is a named failure mode of evolutionary loops. If every agent pulls from one pool, do their verifiers become identical — and therefore identically exploitable by one novel attack? *(This is a genuinely good thing to raise unprompted; it shows you know the failure mode.)*
 4. **Who vaccinates the vaccinators?** The pool is a single point of poisoning. One bad general "defense" propagates everywhere. [Salami Attack `2608.01637`](https://arxiv.org/abs/2608.01637) shows colluding agents poisoning shared memory via sub-threshold edits.
@@ -409,4 +410,6 @@ Graded cold by a separate model given the full picture including the known weakn
 
 **Verdict: sharpen, do not replace.** Switching ideas at this hour burns two hours re-scoping and forfeits an uncontested lane, a component base already installed, and a motivation paper the judges read this week. Every problem with Herd is surgical.
 
-**Still unsolved and worth being honest about:** what counts as a "general" patch is the hard technical question, and it is currently one word. That is where the real engineering is — and answering it well is probably what separates this from a shared lint config.
+**The flaw that review identified as the real engineering — "what counts as a *general* patch is currently one word" — is now solved in [GENERALITY.md](GENERALITY.md).** The short version: stop classifying, start measuring. A patch is general when it has blocked a **re-derived** attack on verifiers it never saw, harmed none of them, and accumulated enough evidence to pass the same sequential test the local loop uses. Not because a model said it looked general.
+
+That is also what separates Herd from a shared lint config: **every antibody in the pool can tell you what infected somebody else, and prove it helped.**
