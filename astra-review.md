@@ -1,3 +1,5 @@
+> **Historical DOJO proposal:** The active direction is shared-skill HERD, specified in [claude/HERD.md](claude/HERD.md) and [claude/ARCHITECTURE.md](claude/ARCHITECTURE.md). This file is preserved as research and decision history.
+
 # Devil's-advocate review of DOJO
 
 **Review date:** September 13, 2026.

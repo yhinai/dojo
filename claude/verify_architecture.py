@@ -1,187 +1,144 @@
 #!/usr/bin/env python3
-"""Structural verification of claude/ARCHITECTURE.md.
+"""Check HERD v2 protocol defaults and reference gate arithmetic.
 
-Encodes the component graph as data and asserts the design invariants.
-Exit code 0 = all checks pass. Non-zero = prints every violation.
+This does not execute a learner, notebook, sandbox, sponsor integration, or
+statistical sampler. PASS is design consistency, not application verification.
 """
 from __future__ import annotations
-import sys
-from dataclasses import dataclass, field
 
-UNTRUSTED, TRUSTED, OBSERVE = "untrusted", "trusted", "observe"
+import argparse
+import json
+import math
+from pathlib import Path
 
-@dataclass
-class Component:
-    name: str
-    domain: str
-    produces: set[str] = field(default_factory=set)
-    consumes: set[str] = field(default_factory=set)
-    credentials: set[str] = field(default_factory=set)
+ROOT = Path(__file__).resolve().parent
 
-# ---- Component graph, transcribed from ARCHITECTURE.md §2, §5, §6 -------------------
-C = {c.name: c for c in [
-    Component("TaskRegistry", TRUSTED,
-        produces={"Task"},
-        consumes={"terminal-wrench:tasks"}),
-    Component("ExploitLibrary", TRUSTED,
-        produces={"PortableExploit"},
-        consumes={"terminal-wrench:trajectories"}),
-    Component("AgentCell", UNTRUSTED,
-        produces={"Trajectory", "Patch:quarantine"},
-        consumes={"Task", "PortableExploit:train", "Pool:read"},
-        credentials={"INFERENCE_KEY", "WANDB_KEY[herd-agents]"}),
-    Component("Sandbox", UNTRUSTED,
-        produces={"AttemptResult"},
-        consumes={"Task", "Pool:read"},
-        credentials={"INFERENCE_KEY"}),
-    Component("TrialRunner", TRUSTED,
-        produces={"TrialRecord", "Pool:write", "EvidenceBundle"},
-        consumes={"Patch:quarantine", "Task", "PortableExploit", "AttemptResult", "Pool:read"},
-        credentials={"INFERENCE_KEY", "WANDB_KEY[herd-audit]", "POOL_PUSH_KEY", "LEDGER_SIGNING_KEY"}),
-    Component("Pool", TRUSTED,
-        produces={"Pool:read", "PoolEntry"},
-        consumes={"Pool:write"}),
-    Component("DetectorEnsemble", TRUSTED,
-        produces={"Verdict", "DetectorScore:behavioural", "DetectorScore:signature", "DetectorScore:learned"},
-        consumes={"Trajectory", "terminal-wrench:trajectories"},
-        credentials={"INFERENCE_KEY"}),
-    Component("Auditor", TRUSTED,
-        produces={"Weave[herd-audit]", "EvidenceBundle"},
-        consumes={"Trajectory", "Verdict", "DetectorScore:behavioural", "DetectorScore:signature", "DetectorScore:learned"},
-        credentials={"WANDB_KEY[herd-audit]", "LEDGER_SIGNING_KEY", "INFERENCE_KEY"}),
-    Component("Ledger", TRUSTED,
-        produces={"Ledger:read"},
-        consumes={"EvidenceBundle"}),
-    Component("Metrics", TRUSTED,
-        produces={"Metric:colony_asr", "Metric:herd_immunity", "Metric:transfer_task",
-                  "Metric:transfer_family", "Metric:benign_pass", "Metric:detector_tpr_5fpr",
-                  "Metric:false_commit", "Metric:pool_precision", "Metric:exploit_novelty",
-                  "Weave[herd-audit]:leaderboard"},
-        consumes={"Ledger:read", "Weave[herd-audit]", "PoolEntry", "TrialRecord", "Task", "PortableExploit:heldout"},
-        credentials={"WANDB_KEY[herd-audit]"}),
-    Component("Orchestrator", TRUSTED,
-        produces={"GenerationRecord"},
-        consumes={"Pool:read"}),
-    Component("ControlRoom", OBSERVE,
-        produces=set(),
-        consumes={"Weave[herd-audit]", "Ledger:read", "PoolEntry", "Trajectory",
-                  "Metric:colony_asr", "Metric:herd_immunity", "Metric:transfer_task",
-                  "Metric:transfer_family", "Metric:benign_pass", "Metric:detector_tpr_5fpr"},
-        credentials={"WANDB_KEY[herd-agents]:read", "WANDB_KEY[herd-audit]:read"}),
-    Component("ARIA", OBSERVE,
-        produces={"IncidentReport"},
-        consumes={"Weave[herd-audit]", "Metric:herd_immunity", "Metric:pool_precision"}),
-]}
 
-# Artifacts that come from outside the system.
-EXTERNAL = {"terminal-wrench:tasks", "terminal-wrench:trajectories"}
+def require(condition: bool, message: str) -> None:
+    if not condition:
+        raise ValueError(message)
 
-# Artifact aliasing: a producer of X also satisfies a consumer of X:<qualifier>.
-def satisfied(artifact: str, producers: set[str]) -> bool:
-    if artifact in producers or artifact in EXTERNAL:
-        return True
-    base = artifact.split(":")[0]
-    return base in producers and artifact.split(":")[1] in {"train", "heldout", "read"}
 
-# Promotion gate inputs (ARCHITECTURE.md §2.7): behavioural detectors only.
-GATE_INPUTS = {"DetectorScore:behavioural", "PairedOutcome"}
+def reference_update(state: dict, pair_id: str, outcome: str, binding: str,
+                     bet: float) -> dict:
+    """Small serializable reference for binding and duplicate-evidence checks."""
+    require(binding == state["binding"], "changed stream binding")
+    require(pair_id not in state["pair_ids"], "duplicate pair ID")
+    require(outcome in {"win", "loss", "tie"}, "invalid outcome")
+    copied = json.loads(json.dumps(state))
+    copied["pair_ids"].append(pair_id)
+    if outcome == "win":
+        copied["log_e"] += math.log1p(bet)
+    elif outcome == "loss":
+        copied["log_e"] += math.log1p(-bet)
+    return copied
 
-# Demo beats -> artifact they read (ARCHITECTURE.md §8).
-DEMO = {
-    "0:00 two-pane":        {"Trajectory", "DetectorScore:signature"},
-    "0:12 colony":          {"Metric:colony_asr"},
-    "0:27 propagation":     {"PoolEntry", "Weave[herd-agents]"},
-    "0:47 live vaccination":{"Task", "PortableExploit:heldout", "Pool:read"},
-    "1:22 numbers":         {"Metric:transfer_task", "Metric:transfer_family"},
-    "1:37 believe":         {"Metric:detector_tpr_5fpr", "TrialRecord"},
-    "2:07 cost":            {"Metric:benign_pass"},
-    "2:22 sponsors":        {"Weave[herd-audit]:leaderboard", "IncidentReport"},
-}
 
-# Fixer -> pool paths must pass through the trial gate.
-EDGES = [  # (from, to, via)
-    ("AgentCell", "TrialRunner", "Patch:quarantine"),
-    ("TrialRunner", "Pool", "Pool:write"),
-]
+def expect_rejected(call, expected: str) -> None:
+    try:
+        call()
+    except ValueError as exc:
+        require(expected in str(exc), f"wrong rejection: {exc}")
+    else:
+        raise ValueError(f"missing rejection: {expected}")
 
-def main() -> int:
-    v: list[str] = []
-    produced: set[str] = set().union(*(c.produces for c in C.values()))
-    # agents' own observability project is produced implicitly by AgentCell tracing
-    produced.add("Weave[herd-agents]")
 
-    # 1. every consumed artifact is produced
-    for c in C.values():
-        for a in c.consumes:
-            if not satisfied(a, produced):
-                v.append(f"[unproduced] {c.name} consumes '{a}' but nothing produces it")
+def verify(execution_ready: bool = False) -> None:
+    protocol = json.loads((ROOT / "protocol.json").read_text())
+    population = protocol["population"]
+    admission = protocol["admission"]
+    worker = protocol["worker"]
+    final = protocol["final"]
+    require(population["learners"] == 5, "five learners must be preserved")
+    require(population["rounds"] == 3, "three rounds must be preserved")
+    slots = (population["learners"] * population["rounds"]
+             * population["candidates_per_learner_per_round"])
+    require(slots == admission["candidate_slots"], "slot allocation mismatch")
+    require(0 < admission["alpha_total"] < 1, "invalid total alpha")
+    require(admission["alpha_allocation"] == "equal_reserved_slots", "unknown allocation")
+    alpha_slot = admission["alpha_total"] / slots
+    threshold = 1 / alpha_slot
+    bet = admission["lambda"]
+    require(0 < bet < 1, "invalid fixed bet")
+    minimum_wins = math.ceil(math.log(threshold) / math.log1p(bet))
+    require(admission["max_pairs_per_candidate"] >= minimum_wins,
+            "gate cannot cross even with all wins")
+    require(math.isclose(alpha_slot * slots, admission["alpha_total"]),
+            "alpha allocations exceed declared family budget")
+    require(admission["fresh_task_ids"], "fresh evidence required")
+    require(admission["requires_regression_controls"], "regression controls required")
+    require(admission["requires_integrity_controls"], "integrity controls required")
+    require(admission["on_insufficient_evidence"] == "quarantine", "unsafe exhaustion rule")
+    require(admission["on_duplicate_pair"] == "reject_update", "duplicate evidence allowed")
+    required_binding = {
+        "candidate_hash", "incumbent_pool_hash", "retriever_hash", "model_config_hash",
+        "runtime_lock_hash", "docs_snapshot_hash", "sampler_hash",
+    }
+    require(set(admission["stream_binding_fields"]) == required_binding,
+            "incomplete stream binding")
+    require(worker["fresh_trial_sessions"] and worker["fresh_final_sessions"],
+            "fresh worker isolation required")
+    require(worker["equal_tools_and_docs_across_arms"], "unequal worker capabilities")
+    require(population["round_snapshot_barrier"], "round snapshot barrier required")
+    require(final["read_only_after_selection"], "final audit may not alter the pool")
+    require(len(set(final["arms"])) == 4, "four unique comparison arms required")
+    require(final["primary_comparison"] == ["admitted_pool", "no_pool"],
+            "primary comparison changed")
+    require(final["interval_unit"] == "task_family_cluster", "wrong interval unit")
+    require(final["tasks"] >= final["template_families"] > 1, "invalid family coverage")
 
-    # 2. pool has exactly one writer and it is TrialRunner (I2)
-    writers = [c.name for c in C.values() if "Pool:write" in c.produces]
-    if writers != ["TrialRunner"]:
-        v.append(f"[I2] Pool writers must be exactly ['TrialRunner'], got {writers}")
-    keyholders = [c.name for c in C.values() if "POOL_PUSH_KEY" in c.credentials]
-    if keyholders != ["TrialRunner"]:
-        v.append(f"[I2] POOL_PUSH_KEY holders must be exactly ['TrialRunner'], got {keyholders}")
+    initial = {"binding": "frozen-example", "pair_ids": [], "log_e": 0.0}
+    state = initial
+    for index in range(minimum_wins - 1):
+        state = reference_update(state, f"pair-{index}", "win", "frozen-example", bet)
+    require(state["log_e"] < math.log(threshold), "premature threshold crossing")
+    resumed = json.loads(json.dumps(state))
+    state = reference_update(resumed, "threshold-pair", "win", "frozen-example", bet)
+    require(state["log_e"] >= math.log(threshold), "missing threshold crossing")
+    tied = reference_update(state, "tie-pair", "tie", "frozen-example", bet)
+    require(tied["log_e"] == state["log_e"], "tie changed evidence")
+    lost = reference_update(tied, "loss-pair", "loss", "frozen-example", bet)
+    require(lost["log_e"] < tied["log_e"], "loss did not reduce evidence")
+    expect_rejected(lambda: reference_update(state, "threshold-pair", "win",
+                                             "frozen-example", bet), "duplicate pair")
+    expect_rejected(lambda: reference_update(state, "new", "win", "changed", bet),
+                    "changed stream binding")
+    threshold_crossed = state["log_e"] >= math.log(threshold)
+    controls_pass = False
+    require(not (threshold_crossed and controls_pass), "regression veto bypassed")
 
-    # 3. audit record writers are trusted; untrusted components hold no audit keys (I1)
-    for c in C.values():
-        if c.domain == UNTRUSTED:
-            bad = {k for k in c.credentials if k in {"WANDB_KEY[herd-audit]", "LEDGER_SIGNING_KEY", "POOL_PUSH_KEY"}}
-            if bad:
-                v.append(f"[I1] untrusted {c.name} holds {sorted(bad)}")
-            if c.produces & {"Weave[herd-audit]", "EvidenceBundle", "Pool:write"}:
-                v.append(f"[I1] untrusted {c.name} writes an audit artifact")
-    for c in C.values():
-        if c.domain == OBSERVE and any(not k.endswith(":read") for k in c.credentials):
-            v.append(f"[I1] observe-domain {c.name} holds a write credential: {sorted(c.credentials)}")
+    for name in ["HERD.md", "ARCHITECTURE.md", "GENERALITY.md", "BUILD_PLAN.md"]:
+        content = (ROOT / name).read_text()
+        require(content.count("```") % 2 == 0, f"unbalanced fences in {name}")
 
-    # 4. every Fixer->Pool path goes through TrialRunner (I2)
-    direct = [e for e in EDGES if e[0] == "AgentCell" and e[1] == "Pool"]
-    if direct:
-        v.append(f"[I2] direct AgentCell->Pool edge exists: {direct}")
-    if not any(e == ("AgentCell", "TrialRunner", "Patch:quarantine") for e in EDGES):
-        v.append("[I2] no AgentCell->TrialRunner quarantine edge")
+    if execution_ready:
+        required = {
+            "model_id": worker["model_id"],
+            "runtime_lock_hash": worker["runtime_lock_hash"],
+            "docs_snapshot_hash": worker["docs_snapshot_hash"],
+            "dollar_cap": protocol["resources"]["dollar_cap"],
+            "verified_model_pricing": protocol["resources"]["verified_model_pricing"],
+        }
+        missing = [key for key, value in required.items() if value is None]
+        require(not missing, "execution preflight unresolved: " + ", ".join(missing))
+        raise ValueError("application execution and isolation tests still required; this checker cannot certify readiness")
 
-    # 5. every metric has a producer and Metrics consumes only held-out/ledger sources (I5)
-    metric_names = {a for a in produced if a.startswith("Metric:")}
-    expected = {"Metric:" + m for m in ["colony_asr","herd_immunity","transfer_task","transfer_family",
-                "benign_pass","detector_tpr_5fpr","false_commit","pool_precision","exploit_novelty"]}
-    missing = expected - metric_names
-    if missing:
-        v.append(f"[I5] metrics declared in §2.10 but not produced: {sorted(missing)}")
-    if "Trajectory" in C["Metrics"].consumes:
-        v.append("[I5] Metrics must not consume raw agent Trajectory (self-report); use Ledger/Weave[herd-audit]")
+    development = population["learners"] * population["rounds"] * population["development_tasks_per_learner_per_round"]
+    trial = slots * admission["max_pairs_per_candidate"] * 2
+    audit = final["tasks"] * len(final["arms"]) * final["worker_repeats"]
+    print("HERD V2 PROTOCOL CHECK: PASS")
+    print(f"Scope: {population['learners']} learners, {population['rounds']} rounds, {slots} candidate slots")
+    print(f"Alpha/slot: {alpha_slot:.8f}; evidence threshold: {threshold:g}; minimum all-win pairs: {minimum_wins}")
+    print(f"Worker episode ceiling before controls/retries: {development} development + {trial} admission + {audit} final = {development + trial + audit}")
+    print("Checked: arithmetic, stream binding, duplicate rejection, serialized resume, ties/losses, veto, protocol flags, document fences")
+    print("NOT CHECKED: application behavior, runtime isolation, valid sampling assumptions, actual transfer, sponsor integrations")
 
-    # 6. every demo beat reads an artifact that exists
-    for beat, arts in DEMO.items():
-        for a in arts:
-            if not satisfied(a, produced):
-                v.append(f"[demo] beat '{beat}' reads '{a}' which nothing produces")
-
-    # 7. promotion gate consumes behavioural detectors only (§2.7)
-    gate_bad = GATE_INPUTS & {"DetectorScore:signature", "DetectorScore:learned"}
-    if gate_bad:
-        v.append(f"[gate] promotion gate must not consume {sorted(gate_bad)}")
-
-    # 8. trust-domain data flow: nothing flows from OBSERVE back into TRUSTED/UNTRUSTED
-    for c in C.values():
-        if c.domain == OBSERVE and c.produces - {"IncidentReport"}:
-            v.append(f"[flow] observe-domain {c.name} produces non-report artifact {sorted(c.produces)}")
-
-    if v:
-        print("ARCHITECTURE VERIFICATION: FAIL")
-        for line in v:
-            print("  -", line)
-        return 1
-    print("ARCHITECTURE VERIFICATION: PASS")
-    print(f"  components={len(C)}  artifacts={len(produced)}  demo_beats={len(DEMO)}")
-    print("  I1 audit-write isolation .......... ok")
-    print("  I2 single pool writer via gate .... ok")
-    print("  I5 metrics from audit sources ..... ok")
-    print("  §2.7 gate on behavioural only ..... ok")
-    print("  §8 every demo beat has a source ... ok")
-    return 0
 
 if __name__ == "__main__":
-    sys.exit(main())
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--execution-ready", action="store_true")
+    args = parser.parse_args()
+    try:
+        verify(args.execution_ready)
+    except (ValueError, KeyError, OSError, json.JSONDecodeError) as exc:
+        parser.exit(1, f"HERD V2 PROTOCOL CHECK: FAIL — {exc}\n")

@@ -1,3 +1,5 @@
+> **Historical DOJO proposal:** The active direction is shared-skill HERD, specified in [claude/HERD.md](claude/HERD.md) and [claude/ARCHITECTURE.md](claude/ARCHITECTURE.md). This file is preserved as research and decision history.
+
 # ASTRA Research Brief — DOJO for CoreWeave Hacks
 
 > **Project:** DOJO — teach a tool-using agent to recover from failure, then test whether the lesson deserves to stay.

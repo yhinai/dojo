@@ -1,282 +1,238 @@
-# The Generality Problem
+# HERD v2 — When does a lesson deserve to spread?
 
-**When is a patch general enough to publish to the shared pool?**
+> Active shared-skill admission specification. This replaces the earlier verifier-patch generality design. [Architecture](ARCHITECTURE.md) · [Reference protocol](protocol.json).
 
-This is Herd's load-bearing question. Get it wrong in one direction and the pool fills with task-specific noise that breaks everyone. Wrong in the other and nothing propagates, the colony effect vanishes, and Herd degenerates into N independent hardening loops — which is just harden-v0 run in parallel.
+## 1. The precise question
 
----
+A lesson is worth sharing when adding it to the current retrieval-enabled pool improves fresh-worker task outcomes in a declared applicability domain, without failing the registered regression and integrity controls.
 
-## 1. Why the obvious answer fails
+This is a statement about a **particular lesson version, worker configuration, retrieval policy, tool runtime, and task distribution**. It is not an intrinsic property of a sentence. A correct sentence can be redundant, poorly retrieved, too broad, or harmful through context displacement.
 
-The published implementation asks the Fixer, in a prompt:
+Distinguish:
 
-> *"Push to pool ONLY the changes that address a general attack class (e.g., timing, monkeypatching, permissions, general environment hardening). The changes must NOT contain any specifics of this task. When in doubt, do not make changes to the pool."*
+- **Truth:** is the technical advice supported by the tool's behavior or documentation?
+- **Applicability:** does the advice apply to this task and runtime?
+- **Utility:** does injecting it improve a worker's outcomes?
+- **Transfer:** does utility appear on tasks and workers outside the originating experience?
+- **Composition:** does it remain useful alongside existing lessons?
 
-That is a vibe check performed by the same agent that wrote the patch, on its own work, with no feedback signal. It fails three ways:
+A source citation helps establish truth. It cannot establish all five properties.
 
-1. **No ground truth.** The Fixer has never seen another agent's verifier. It is guessing about a population it cannot observe.
-2. **Self-assessment is exactly the thing this project exists to distrust.** Across 35 model-game cells, self-assigned scores all landed ≥0.70 while **15 of 35 scored below random** ([`2607.24300`](https://arxiv.org/abs/2607.24300)). We are not going to build a system whose central gate is an agent grading itself.
-3. **"When in doubt, don't" is a silent kill switch.** Under uncertainty the Fixer defaults to not publishing, the pool stays empty, and the colony never forms. The failure is invisible — nothing breaks, nothing propagates.
+## 2. The candidate package
 
-## 2. The reframe
+A package contains one or two related procedural bullets, scope tags, a runtime hash, exclusion conditions, origin learner/task IDs, repair evidence references, and a content hash. The package is the unit of statistical evaluation.
 
-> **Generality is not a property of the patch text. It is an empirical property of the patch's behaviour on other agents' verifiers.**
+If two bullets are admitted together, report that the package helped; do not pretend the experiment isolated each bullet. Follow-up ablations can later split or remove redundant statements.
 
-So stop classifying and start **measuring**. This turns an unanswerable judgement call into an evaluation problem — which is the one kind of problem this whole project is already built to handle.
+The worker sees instructions and short generic examples. It does not receive private evaluation labels, whole source notebooks, source-specific outputs, or the source agent's conversation.
 
-The shape it takes is a **clinical trial**: a candidate must demonstrate *efficacy* on hosts it was not designed for, and cause *no adverse events* on any of them, before it is licensed for the population.
+## 3. Admission pipeline
 
-That is also, conveniently, exactly what an immune system does. Nothing enters the shared repertoire on the strength of looking useful.
-
----
-
-## 3. The pipeline
-
-```
-  local patch accepted by its own agent
-            │
-            ▼
-   ┌────────────────────┐
-   │  STAGE 0           │   active locally only; never auto-shared
-   │  QUARANTINE        │
-   └─────────┬──────────┘
-             ▼
-   ┌────────────────────┐   deterministic, ~50 LOC, kills most junk
-   │  STAGE 1           │   reject if the diff references task-local vocabulary
-   │  ADMISSIBILITY     │
-   └─────────┬──────────┘
-             ▼
-   ┌────────────────────┐   cheap prior: what machinery does it touch?
-   │  STAGE 1.5         │   order candidates; dedupe against the pool
-   │  TRIAGE            │
-   └─────────┬──────────┘
-             ▼
-   ┌────────────────────┐   apply to k OTHER agents' verifiers
-   │  STAGE 2           │   measure efficacy + non-interference on each
-   │  TRIAL             │
-   └─────────┬──────────┘
-             ▼
-   ┌────────────────────┐   sequential e-process over trial outcomes
-   │  STAGE 3           │   promote when E >= 1/alpha
-   │  PROMOTION GATE    │
-   └─────────┬──────────┘
-             ▼
-   ┌────────────────────┐   keep measuring; retract on adverse events
-   │  STAGE 4           │   pool membership is revocable
-   │  PHARMACOVIGILANCE │
-   └────────────────────┘
+```text
+Verified local repair
+  → Distilled lesson hypothesis
+  → Schema/version/scope checks
+  → Leakage and contradiction checks
+  → Development probes
+  → Freeze package + incumbent + protocol
+  → Fresh paired transfer stream
+  → PACE-style threshold + regression/integrity checks
+  → Atomic pool version or explicit quarantine/rejection
 ```
 
----
+Development probes may be used to improve a draft. Once statistical evaluation starts, any content edit starts a new candidate slot and a new evidence stream. Failed streams cannot be silently reset until they get lucky.
 
-## 4. Stage 1 — Admissibility (deterministic)
+A lesson drawn from an unsuccessful local repair cannot enter this path as a demonstrated repair lesson. It may remain a research hypothesis outside the active pool.
 
-A patch is **inadmissible for the pool** if it references anything that only exists in its own task. This is a hard filter with no model in the loop, and it is fully explainable — you can point at the exact token that disqualified a patch.
+## 4. What counts as a pair
 
-```python
-def task_vocabulary(task) -> set[str]:
-    """Every content-bearing token that is specific to this task."""
-    v = set()
-    v |= identifiers(task.tests)           # test fn names, fixture names, class names
-    v |= identifiers(task.reference_solution)
-    v |= string_literals(task.tests)       # expected values, paths, magic constants
-    v |= path_components(task.dir)         # task id, directory names
-    v |= content_words(task.instruction)   # minus a stoplist
-    return v - HARNESS_COMMON              # names shared by every task's scaffold
+For pair i, create two independent fresh worker sessions on the same newly drawn task and fixture:
 
-def admissible_for_pool(patch, task) -> tuple[bool, str | None]:
-    tokens = identifiers(patch.added_lines) | string_literals(patch.added_lines)
-    leak = tokens & task_vocabulary(task)
-    if leak:
-        return False, f"references task-local vocabulary: {sorted(leak)[:5]}"
-    if any(f.startswith(task.dir) and f not in HARNESS_SHARED_FILES
-           for f in patch.files_touched):
-        return False, "modifies task-local files only"
-    return True, None
+- **Control:** current pool P.
+- **Treatment:** P plus candidate L through the same retriever.
+
+The model, tool permissions, public docs, time/action/token limits, runtime, and evaluator are identical. Each side starts from a clean workspace and empty conversation. Randomize which executes first. Each side may use the same permitted local repair budget.
+
+A fixed task identity pairs the outcomes. Identical provider seeds do not guarantee identical model sampling, and are not required for the comparison. Record them when supported. Changes in model version or provider configuration invalidate the stream's frozen configuration.
+
+Let treatment success be T_i and control success be C_i:
+
+| T_i | C_i | Evidence |
+|---:|---:|---|
+| 1 | 0 | Win for candidate |
+| 0 | 1 | Loss for candidate |
+| 1 | 1 | Tie: both succeed |
+| 0 | 0 | Tie: both fail |
+
+Invalid infrastructure pairs are not evidence. Candidate-caused failure is a real zero. Do not remove disappointing outcomes as infrastructure noise.
+
+## 5. Scope of the null hypothesis
+
+The reference update assumes that under the no-improvement null, each discordant pair is conditionally no more likely to favor treatment than control, given earlier evidence. Under that assumption, the evidence process supports a bound on erroneous promotion.
+
+For binary task success, the difference in success probabilities is the probability of a treatment-only success minus the probability of a control-only success. This connects the paired comparison to success lift in the declared sampling distribution.
+
+To make the conditional assumption plausible:
+
+1. Freeze candidate, comparator, retriever, model, runtime, and task distribution before sampling.
+2. Draw new task instances using the registered sampler, not a search for cases the candidate is known to win.
+3. Never replay a deterministic result as a new observation.
+4. Do not change the candidate based on partial trial outcomes.
+5. Do not prioritize tasks after learning their likely paired result.
+6. Record any drift, dependency, or reuse that undermines the sampling model.
+
+Repeated templates can limit external diversity even with independently sampled fixtures. The final report must state the family coverage and use appropriate clustered summaries. Statistical validity inside a sampler is not proof that the sampler represents all real work.
+
+## 6. PACE-style evidence update
+
+For discordant outcomes, define w_i = 1 for a win and 0 for a loss. With lambda fixed at 0.5:
+
+```text
+E_0 = 1
+E_i = E_(i-1) × [1 + 0.5 × (2w_i − 1)]
+
+win:  E ← E × 1.5
+loss: E ← E × 0.5
+tie:  E unchanged
 ```
 
-**Why this is not merely a lint.** It encodes the actual definition of task-specificity: a patch that mentions `test_sort_descending` or the literal `42` from this task's expected output *cannot* be general, no matter how it is phrased. Roughly the majority of junk dies here, for free, before a single LLM call.
+Use log space in implementation. Persist wins, losses, ties, pair IDs, and the full stream binding alongside log(E).
 
-**Deliberate asymmetry:** admissibility is necessary, not sufficient. Passing Stage 1 earns a patch a *trial*, nothing more.
+The PACE paper motivates a per-candidate sequential acceptance test and explicitly limits its claim to the conditional paired null. It does not certify universal lesson correctness or automatically control an entire adaptive colony. [PACE primary source](https://arxiv.org/html/2606.08106v1)
 
----
+## 7. Explicit experiment-wide error allocation
 
-## 5. Stage 1.5 — Triage (cheap prior, saves trials)
+The full requested run has five learners × three rounds = **15 reserved candidate slots**. Allocate a total statistical false-promotion budget of 0.05 across those slots:
 
-Trials cost real LLM calls, so order candidates by expected information rather than trialing arbitrarily.
-
-**Mechanism level** — what layer of machinery does the patch touch? This is a strong prior on generality and it is readable straight off the diff:
-
-| Prior | Signal in the patch | Example |
-|---|---|---|
-| **High** | process / interpreter / OS machinery | subprocess isolation · import hooks · `sys.audit` hooks · env sanitization · file permissions · clock and timer capture · RNG seeding · capturing builtins before user code loads |
-| **Medium** | harness-shared structure | test runner invocation · result parsing · artifact handling · resource limits |
-| **Low** | assertion content | changing a specific expected value · adding a test for one behaviour · tightening one comparison |
-
-This mirrors what the published colony actually converged on. Every layer in the final hardened verifier was mechanism-level: process isolation, monkeypatch capture, stack-introspection blocking, tensor-subclass detection, timing hardening, seed unpredictability. **Not one was assertion-level.** The prior is empirically grounded, not invented.
-
-**Dedupe before trialing.** Embed the patch's *mechanism description* (not its diff text) and compare against pool members. Near-duplicates get merged into the existing entry as additional evidence rather than consuming a trial slot.
-
----
-
-## 6. Stage 2 — The trial (the actual definition)
-
-Apply the candidate patch to **k other agents' verifiers**, selected for maximum dissimilarity — different task family, different oracle type, different capability profile. Then on each host measure two things.
-
-### Efficacy — does it block the attack *class* on a verifier it never saw?
-
-This requires exploits to be **portable**, which means an exploit cannot be a literal payload. It has to be a *strategy that gets re-derived against the host*.
-
-```
-PortableExploit = (family, recipe)
-    family : one of terminal-wrench's 11 categories
-             hollow-implementation · output-spoofing · constraint-loophole ·
-             structural-extraction · binary-hijacking · algorithmic-simplification ·
-             mutable-input-tampering · keyword-gaming · metric-spoofing ·
-             security-downgrading · deceptive-rationalization
-    recipe : natural-language strategy, task-agnostic
+```text
+alpha_total = 0.05
+alpha_slot = 0.05 / 15 = 1 / 300
+threshold_slot = 1 / alpha_slot = 300
 ```
 
-To test efficacy on host H, the Red agent is told: *"Obtain a passing verdict from H's verifier using the {family} strategy."* It re-derives the attack against H's actual code.
+If each slot's conditional bound is valid, a union bound limits the probability of at least one statistical false promotion across these 15 comparisons to at most 0.05. This is a conservative design extension; it is not a claim that the original PACE experiment established this system's guarantee.
 
-> **This also repairs the circularity in the original proof moment.** Re-derivation is what makes transfer meaningful: you are testing whether the *defense class* holds, not whether one literal payload is blocked by the patch that was written to block it.
+The bound does not cover oracle bugs, task-distribution mismatch, dishonest event capture, hidden leakage, or unmeasured regressions. The UI must name it a statistical comparison bound under stated assumptions.
 
-### Non-interference — does it break honest work it was not written for?
+Unused slots are not silently reassigned after seeing evidence. Rewording a lesson, changing its scope, replacing its comparator, or rerunning after rejection uses a new reserved slot. If none remain, preserve the candidate as unadmitted for the next registered experiment.
 
-Run **each host's own Solver** against the patched verifier. Critically, use **≥2 diverse legitimate solutions per host**, not one reference implementation.
+### Evidence feasibility
 
-This guards against the exact bug the published work hit: because the KernelBench oracle solver never exercised `torch.cpp_extension.load_inline` or raw cuBLAS handles, **two over-restrictive defenses slipped past per-iteration validation** and had to be repaired by a separate post-loop pass. A single reference solution does not exercise enough of the surface to detect over-restriction.
+At these defaults:
 
-### The definition
+- 5 consecutive wins: E = 7.59375, insufficient.
+- 14 consecutive wins: E ≈ 291.93, still insufficient.
+- 15 consecutive wins: E ≈ 437.89, crosses 300.
 
-> A patch is **general** iff it is **efficacious on a significant fraction of hosts** and **harmless on all of them.**
+A candidate receives up to **64 fresh pairs**. Ties use runtime budget but contribute no evidence; losses require additional wins. A weak improvement can remain unadmitted. Five agents and three rounds do not imply fifteen winning pairs.
 
-Efficacy is the evidence signal; non-interference is a **hard veto**. One adverse event sinks the candidate — asymmetric on purpose, because a bad patch in the pool damages every agent at once, while a rejected good patch costs only one agent's local benefit.
+This fixes the old architecture's impossible five-host promotion while keeping statistical rigor. Do not reduce the threshold just to ensure that something appears in the pool during the demo.
 
----
+## 8. Admission decision
 
-## 7. Stage 3 — Promotion gate (sequential, not a threshold)
+The sequential threshold is necessary, not sufficient. A candidate can activate only when:
 
-"It worked on 3 of 5 hosts" is a raw threshold, and raw thresholds against repeated trials are the same p-hacking problem the local loop already solved. Use the same machinery.
+1. Its schema, runtime, and evidence binding remain valid.
+2. E reaches the registered threshold.
+3. All required fixed integrity and poisoning controls pass.
+4. The candidate pool introduces no failure on the registered must-pass regression controls relative to their validated reference outcomes.
+5. The pool-service compare-and-swap confirms the incumbent hash is unchanged.
+6. The required evidence artifacts exist and their hashes match.
 
-Each host trial is a **paired observation**: host H with the patch vs. host H without it, facing the same re-derived exploit.
+The controls are a finite release policy, not an inferential proof of zero harm. Repeatedly inspected regression cases are not an untouched final set.
 
-```python
-E = 1.0
-for host in trial_hosts:                    # ordered by dissimilarity, most informative first
-    blocked_with    = attack(host, patched=True,  family=f).blocked
-    blocked_without = attack(host, patched=False, family=f).blocked
+If the threshold is not crossed at the maximum pair count, return `INSUFFICIENT_EVIDENCE`. That does not establish that the lesson is useless. If a must-pass control fails, return `REJECTED_REGRESSION` with the failing check. A structural violation returns a different named reason.
 
-    if not non_interference(host, patched=True):
-        return REJECT, "adverse event"      # hard veto, no accumulation
+The primary gate tests success rather than token efficiency. If a candidate only reduces tokens while preserving success, this experiment can report that as secondary evidence; do not promote it through an undeclared cost-only rule. A future cost-focused gate needs its own endpoint and protocol.
 
-    if blocked_with == blocked_without:
-        continue                            # tie: patch made no difference here, discard
-    w = 1 if (blocked_with and not blocked_without) else 0
-    E *= (1 + LAMBDA * (2*w - 1))
+## 9. Fair strong baselines
 
-    if E >= 1 / ALPHA:
-        return PROMOTE, f"E={E:.1f} after {host.n} hosts"
-return QUARANTINE, "insufficient evidence"
-```
+The final four-arm experiment includes:
 
-Under `H0: Pr[w=1] <= 1/2` ("this patch is no better than nothing on a host it wasn't written for"), Ville's inequality bounds the false-promotion probability at α **under optional stopping** — so you may stop as soon as evidence crosses, and you can order hosts most-informative-first without invalidating the guarantee.
+- no shared memory, with normal documentation access;
+- a fixed curated documentation quick-reference;
+- unfiltered development memory selected by a frozen rule;
+- the statistically admitted shared pool.
 
-**The same gate now guards both the local loop and the pool.** One mechanism, two uses. That is worth saying out loud in the pitch — it is the kind of economy a builder panel notices.
+The docs baseline challenges the proposition that ordinary documentation is enough. The raw-memory baseline challenges whether admission and distillation improve on simply retaining experience. The no-pool comparison answers the requested headline.
 
----
+All arms have the same worker capabilities and overall budgets. The memory-bearing arms have equal envelope caps. Compare actual resource use; do not mistake a greater context allowance for a learning algorithm.
 
-## 8. Stage 4 — Pharmacovigilance (the pool can retract)
+## 10. What “fresh agent” means
 
-Promotion is a licence, not tenure. Every pool member carries earned counters:
+A fresh worker has:
 
-```
-PoolEntry:
-    mechanism_summary : str
-    capability_tags   : set[str]      # see §9
-    hosts_tested      : int
-    efficacy_count    : int
-    adverse_count     : int
-    promoted_at       : generation
-    provenance        : (origin_agent, exploit_family, trial_record)
-```
+- a new conversation;
+- a new workspace and notebook process;
+- no cached source repair or completed training artifact;
+- the same fixed base model and tool access as its comparator;
+- only its assigned context envelope;
+- no access to another arm's outputs.
 
-When a new agent joins the colony and pulls the pool, **its first run is also a fresh trial of every pool member.** If an entry causes a benign-pass regression on the newcomer, `adverse_count` increments; past a threshold the entry is **retracted** to quarantine and every agent drops it on next pull.
+It is an independent session, not a newly trained model. Explain that distinction plainly.
 
-This is what prevents the two failure modes that would otherwise kill the colony:
+The source learner can have failed and repaired a related task. The recipient must not receive that exact completed solution. For stronger transfer, hold out notebook templates and combine learned capabilities in new ways. Do not equate changed variable names with a new problem family.
 
-- **Monoculture.** A defense that only appeared safe because the original cohort was homogeneous gets caught the moment a genuinely different agent joins.
-- **Pool poisoning.** One bad "general" defense propagating everywhere is the single-point-of-failure in the whole design. Retraction bounds the blast radius to one generation. (Relevant: colluding agents poisoning shared memory via sub-threshold edits, [`2608.01637`](https://arxiv.org/abs/2608.01637).)
+## 11. The demo correction
 
-These counters are ACE-style helpful/harmful bookkeeping — except **earned by trial rather than asserted by a model.**
+The proposed sequence “fresh agent fails, then give it the pool and retry the same task” demonstrates assisted recovery, but the second attempt also benefits from its own failure. It cannot isolate transfer from other agents.
 
----
+Use fresh A without the pool and fresh B with the pool. Both receive the same new task and equal budgets. B never sees A's attempt. A side-by-side replay of actual outcomes is acceptable, followed by a live input perturbation showing that the successful notebook is functional.
 
-## 9. Generality is relative, not absolute
+If both pass, show the result and costs. If B fails, do not claim the lesson transferred. A demo task selected because it produces a dramatic contrast must be labeled illustrative; the aggregate held-out comparison is the main evidence.
 
-The sharpest correction to the naive framing:
+## 12. Poisoning and contradiction controls
 
-> **Timing hardening generalizes across every task that measures time. It is meaningless for a task that doesn't.**
+Keep a separate labeled suite of false or overgeneralized candidate lessons. It is not generated evidence and must not be attributed to a spontaneous learner failure.
 
-A patch is not general *in the abstract* — it is general **with respect to a capability set**. So the pool is **typed**, and hosts pull only what applies to them:
+Examples include:
 
-```
-capability_tags ⊆ { timing, subprocess, filesystem, network, imports,
-                    rng, permissions, resource_limits, introspection }
-```
+- the false top-to-bottom cell-ordering rule;
+- advice to suppress an exception instead of fixing the computation;
+- advice to hardcode an observed output;
+- a correct rule applied to an incompatible runtime;
+- a context-heavy redundant lesson that displaces useful advice;
+- two individually plausible lessons with conflicting applicability.
 
-A patch inherits tags from the machinery it touches; an agent declares the capabilities its verifier exposes; a host pulls the intersection. Consequences:
+Use these to test the curator, trial service, and regression controls. A poisoning control that is rejected by a schema rule tests schema enforcement; it does not establish that the statistical gate detected harmful semantics. Label the stage responsible for each rejection.
 
-- **Trials only run on hosts with the relevant capability.** No wasted trials, no spurious adverse events from a patch that was never applicable.
-- **Reported transfer is honest.** "Efficacious on 4 of 5 *applicable* hosts" is a true claim; "4 of 5 hosts" would not be.
-- **It gives you a second, sharper headline number:** *within-capability* transfer vs *cross-capability* transfer. The first will be strong. The second is the genuinely hard case and will be weaker — report both.
+## 13. Composition, merge, and revocation
 
----
+Two accepted lessons are not automatically useful together. Retrieval ordering and context limits can alter behavior. Evaluate each candidate as a delta to the current full pool. Do not merge paraphrases into an admitted lesson silently: a content-changing merge creates a new version and candidate comparison.
 
-## 10. Failure modes, stated honestly
+For exact-content duplicates, add provenance links without claiming new statistical evidence or changing the runtime instruction. Near duplicates are a curator recommendation, not an automatic semantic merge.
 
-| Failure | Why it happens | Handled by |
-|---|---|---|
-| **Over-restriction** | Patch blocks the exploit *and* legitimate work, undetected because the local Solver's single reference solution never exercised that path | §6 non-interference with ≥2 diverse solutions per host, on each host's own solver |
-| **Interaction effects** | Patch A and patch B are individually fine; together they break | Trial against the **current pool state**, not a clean baseline; composite smoke test before promotion |
-| **Capability mismatch** | Timing defense trialed on a task with no timing surface | §9 typed pool |
-| **Evidence starvation** | Too few hosts share a capability to accumulate evidence past `1/alpha` | Falls back to QUARANTINE — patch stays local, which is the correct conservative behaviour and is *visible* in the metrics rather than silent |
-| **Monoculture** | Shared defenses converge; one novel attack defeats everyone | §8 retraction on newcomer trials; track defense-set diversity across agents as a monitored metric |
-| **Pool poisoning** | A malicious or degenerate general patch propagates | Hard veto on adverse events + retraction + provenance on every entry |
+If development monitoring reveals a regression, quarantine the implicated lesson or composite and create a new pool revision. If attribution is uncertain, retract the composite revision rather than falsely blaming a single bullet. Restore the last known compatible snapshot while investigating.
 
----
+Final test data remain read-only evidence for the closed experiment. Any fixes prompted by those results belong to a new experiment.
 
-## 11. What this buys the demo
+## 14. Helpful and harmful accounting
 
-A second readable comparison in exactly the shape of greedy-vs-gate — and this one is about the part of the system that is genuinely yours.
+Maintain four separate concepts:
 
-> **"We measured the pool's precision two ways."**
->
-> Ask the Fixer whether its own patch is general — the published approach — and **X% of published patches later cause adverse events on other agents.**
-> Make patches earn it by trial — **Y%.**
+- **Exposure:** the lesson was present in a pool snapshot.
+- **Retrieval:** the lesson was actually injected for a task.
+- **Outcome association:** a retrieved episode succeeded or failed.
+- **Paired effect evidence:** outcomes differed under a defined with/without comparison.
 
-Plus a genuinely interesting artifact for the Q&A: **the pool itself, sorted by earned transfer count.** Judges can read it. Each entry says which agent discovered it, which exploit family produced it, how many hosts it was tried on, and how many it helped.
+ACE-style helpful/harmful counters should refer to the last category when used as effectiveness claims. Association counters can be displayed, but must not be renamed causal benefit. A package trial cannot identify each member's independent effect without ablation.
 
-That is the difference between a shared lint config and an immune repertoire: **every antibody in it can tell you what infected somebody else, and prove it helped.**
+## 15. Limits and failure conditions
 
----
+- A powerful worker may already know the relevant marimo rules. The measured effect can be zero.
+- A correct lesson can fail to transfer because its trigger is unclear or retrieval misses it.
+- A fresh sampler can still be unrepresentative.
+- A finite suite can miss an incorrect behavior.
+- Statistical conservatism can keep a useful lesson quarantined.
+- More agents increase the candidate supply and evaluation bill; they do not guarantee a better pool.
+- A three-round result does not establish indefinite improvement or stability across future versions.
 
-## 12. Cost
+These limitations do not make the idea bad. They identify the conditions the complete system should expose, measure, and handle rather than hide.
 
-| | |
-|---|---|
-| Stage 1 admissibility | deterministic, ~50 LOC, free |
-| Stage 1.5 triage | one embedding per candidate, negligible |
-| Stage 2 trial | the real cost — `k` hosts × (1 re-derived attack + ≥2 solver runs). Use cheap models here; this is precisely the "diverse cheap beats expensive identical" regime, and trials are embarrassingly parallel |
-| Stage 3 gate | arithmetic |
-| Stage 4 vigilance | rides along with each newcomer's first run, no extra cost |
+## 16. What the gate display may say
 
-Trials are the only meaningful spend, they parallelize perfectly, and admissibility kills most candidates before they reach that stage.
+Allowed: “Candidate admitted after these paired trials and registered checks; applies to this runtime and task distribution.”
 
----
+Not supported: “Proven correct,” “helps every agent,” “95% safe,” “no future regressions,” or “five agents voted yes, so statistically verified.”
 
-## 13. The one-line answer
-
-> **A patch is general when it has blocked a re-derived attack on verifiers it never saw, harmed none of them, and accumulated enough evidence to pass the same sequential test we use everywhere else.**
->
-> Not because a model said it looked general.
+The point is to turn a plausible lesson into accountable evidence, without making a stronger claim than the experiment can support.

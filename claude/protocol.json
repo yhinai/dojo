@@ -1,0 +1,77 @@
+{
+  "schema_version": "herd-learning-protocol-v1",
+  "status": "design_defaults_not_executed",
+  "domain": "marimo",
+  "population": {
+    "learners": 5,
+    "rounds": 3,
+    "development_tasks_per_learner_per_round": 3,
+    "candidates_per_learner_per_round": 1,
+    "round_snapshot_barrier": true
+  },
+  "worker": {
+    "model_id": null,
+    "runtime_lock_hash": null,
+    "docs_snapshot_hash": null,
+    "max_tool_calls": 12,
+    "max_submissions": 3,
+    "max_total_tokens": 12000,
+    "max_wall_seconds": 180,
+    "max_memory_envelope_tokens": 2000,
+    "fresh_trial_sessions": true,
+    "fresh_final_sessions": true,
+    "equal_tools_and_docs_across_arms": true
+  },
+  "admission": {
+    "candidate_slots": 15,
+    "max_bullets_per_package": 2,
+    "max_pairs_per_candidate": 64,
+    "alpha_total": 0.05,
+    "alpha_allocation": "equal_reserved_slots",
+    "lambda": 0.5,
+    "fresh_task_ids": true,
+    "stream_binding_fields": [
+      "candidate_hash",
+      "incumbent_pool_hash",
+      "retriever_hash",
+      "model_config_hash",
+      "runtime_lock_hash",
+      "docs_snapshot_hash",
+      "sampler_hash"
+    ],
+    "requires_regression_controls": true,
+    "requires_integrity_controls": true,
+    "on_insufficient_evidence": "quarantine",
+    "on_changed_binding": "new_reserved_slot",
+    "on_duplicate_pair": "reject_update"
+  },
+  "retrieval": {
+    "policy": "version_and_tag_overlap_then_admission_order_then_id",
+    "snapshot_pinned_per_round": true,
+    "exclude_incompatible_or_retracted": true
+  },
+  "final": {
+    "tasks": 60,
+    "template_families": 12,
+    "worker_repeats": 3,
+    "arms": ["no_pool", "curated_docs", "raw_memory", "admitted_pool"],
+    "read_only_after_selection": true,
+    "primary_metric": "budgeted_task_success",
+    "primary_comparison": ["admitted_pool", "no_pool"],
+    "interval_unit": "task_family_cluster"
+  },
+  "resources": {
+    "max_trial_workers": 10,
+    "dollar_cap": null,
+    "verified_model_pricing": null,
+    "require_pricing_and_cap_before_paid_execution": true
+  },
+  "integrations": {
+    "weave": "required_not_yet_implemented",
+    "marimo_control_room": "required_not_yet_implemented",
+    "aria_analysis": "required_access_and_interface_to_verify",
+    "inference_adapter": "required_provider_to_verify",
+    "molab_hosting": "deployment_access_to_verify",
+    "typesafe_adapter": "onsite_interface_to_verify"
+  }
+}

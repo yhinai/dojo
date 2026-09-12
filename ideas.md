@@ -1,3 +1,5 @@
+> **Historical brainstorm:** The active project is shared-skill HERD. Start with [claude/HERD.md](claude/HERD.md) and its linked architecture. Earlier rankings, prize assumptions, and demo suggestions below are retained as history, not active instructions.
+
 # Hackathon Ideas — CoreWeave Hacks (Agent Loops) + Open Model Hack
 
 > Compiled Sept 12, 2026. Ranked by expected win probability given judges, past winners, sponsor-stack alignment, and build feasibility in the time box.
