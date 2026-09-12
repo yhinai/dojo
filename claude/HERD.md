@@ -5,7 +5,7 @@
 > One agent gets infected. All of them get immune.
 
 CoreWeave Hacks: Agent Loops — Sept 12–13, 2026 · 400 Alabama St, SF
-Design doc. Research backing lives in [`../docs/papers.md`](../docs/papers.md), [`../docs/implementation.md`](../docs/implementation.md), [`../docs/freshest.md`](../docs/freshest.md).
+Design doc. **Build spec: [ARCHITECTURE.md](ARCHITECTURE.md)** (verified — see its §9 and `verify_architecture.py`). **Pool admission: [GENERALITY.md](GENERALITY.md).** Research backing lives in [`../docs/papers.md`](../docs/papers.md), [`../docs/implementation.md`](../docs/implementation.md), [`../docs/freshest.md`](../docs/freshest.md).
 
 ---
 
