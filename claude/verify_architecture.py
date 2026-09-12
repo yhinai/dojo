@@ -54,17 +54,28 @@ def verify(execution_ready: bool = False) -> None:
     slots = (population["learners"] * population["rounds"]
              * population["candidates_per_learner_per_round"])
     require(slots == admission["candidate_slots"], "slot allocation mismatch")
-    require(0 < admission["alpha_total"] < 1, "invalid total alpha")
-    require(admission["alpha_allocation"] == "equal_reserved_slots", "unknown allocation")
-    alpha_slot = admission["alpha_total"] / slots
-    threshold = 1 / alpha_slot
+    # --- executed gate: per-candidate ---
+    require(admission["gate_mode"] == "per_candidate", "executed gate must be per-candidate")
+    alpha_c = admission["alpha_candidate"]
+    require(0 < alpha_c < 1, "invalid per-candidate alpha")
+    threshold = 1 / alpha_c
+    require(math.isclose(threshold, admission["threshold_candidate"]), "threshold_candidate != 1/alpha_candidate")
     bet = admission["lambda"]
     require(0 < bet < 1, "invalid fixed bet")
     minimum_wins = math.ceil(math.log(threshold) / math.log1p(bet))
     require(admission["max_pairs_per_candidate"] >= minimum_wins,
             "gate cannot cross even with all wins")
-    require(math.isclose(alpha_slot * slots, admission["alpha_total"]),
-            "alpha allocations exceed declared family budget")
+    # --- documented familywise bound: consistent, reported, not executed ---
+    fw = admission["familywise_reported"]
+    require(fw["slots"] == slots, "familywise slot count mismatch")
+    alpha_slot = fw["alpha_total"] / fw["slots"]
+    require(math.isclose(1 / alpha_slot, fw["threshold"]), "familywise threshold != slots/alpha_total")
+    require(admission["alpha_allocation"] == "per_candidate_with_familywise_reported", "unknown allocation")
+    require(fw["threshold"] > threshold, "familywise bound must be stricter than the executed gate")
+    # --- scheduling ---
+    require(admission["candidate_evaluation"] == "parallel_independent_deltas_vs_round_start_pool",
+            "candidates must be evaluated as independent deltas against the round-start pool")
+    require(admission["composition_check_before_commit"], "composition check required before commit")
     require(admission["fresh_task_ids"], "fresh evidence required")
     require(admission["requires_regression_controls"], "regression controls required")
     require(admission["requires_integrity_controls"], "integrity controls required")
@@ -76,6 +87,19 @@ def verify(execution_ready: bool = False) -> None:
     }
     require(set(admission["stream_binding_fields"]) == required_binding,
             "incomplete stream binding")
+    # --- worker budget must be able to fund the declared tool-call ceiling ---
+    per_turn_floor = worker["max_memory_envelope_tokens"] + 1000   # envelope + minimal prompt/task/tool result
+    require(worker["max_output_tokens_per_turn"] > 0, "per-turn output cap required")
+    require(worker["max_total_tokens"] >= worker["max_tool_calls"] * per_turn_floor,
+            f"episode token budget {worker['max_total_tokens']} cannot fund {worker['max_tool_calls']} tool calls "
+            f"at a {per_turn_floor}-token per-turn floor")
+    # --- oracle, baselines, weave sections ---
+    require(protocol["oracle"]["primary"] == "headless_programmatic", "primary oracle must be headless")
+    require("demo_live_probe" in protocol["oracle"]["browser_required_for"], "browser retained for the live demo probe")
+    require(protocol["baselines"]["curated_docs_authored_before_round"] == 1,
+            "curated-docs baseline must be authored before round one")
+    require(protocol["weave"]["paired_trials_as"] == "weave.Evaluation", "paired trials must map to weave.Evaluation")
+    require(protocol["weave"]["pool_versions_as"] == "weave.Leaderboard", "pool versions must map to weave.Leaderboard")
     require(worker["fresh_trial_sessions"] and worker["fresh_final_sessions"],
             "fresh worker isolation required")
     require(worker["equal_tools_and_docs_across_arms"], "unequal worker capabilities")
@@ -118,6 +142,8 @@ def verify(execution_ready: bool = False) -> None:
             "docs_snapshot_hash": worker["docs_snapshot_hash"],
             "dollar_cap": protocol["resources"]["dollar_cap"],
             "verified_model_pricing": protocol["resources"]["verified_model_pricing"],
+            "curated_docs_hash": protocol["baselines"]["curated_docs_hash"],
+            "raw_memory_selection_rule_hash": protocol["baselines"]["raw_memory_selection_rule_hash"],
         }
         missing = [key for key, value in required.items() if value is None]
         require(not missing, "execution preflight unresolved: " + ", ".join(missing))
@@ -128,9 +154,12 @@ def verify(execution_ready: bool = False) -> None:
     audit = final["tasks"] * len(final["arms"]) * final["worker_repeats"]
     print("HERD V2 PROTOCOL CHECK: PASS")
     print(f"Scope: {population['learners']} learners, {population['rounds']} rounds, {slots} candidate slots")
-    print(f"Alpha/slot: {alpha_slot:.8f}; evidence threshold: {threshold:g}; minimum all-win pairs: {minimum_wins}")
+    print(f"Executed gate: alpha {alpha_c} -> threshold {threshold:g}; minimum all-win pairs {minimum_wins}")
+    print(f"Documented familywise bound: alpha/slot {alpha_slot:.6f} -> threshold {fw['threshold']} (reported, not executed)")
+    print(f"Worker budget: {worker['max_tool_calls']} calls x >= {per_turn_floor} tok floor <= {worker['max_total_tokens']} total; {worker['max_output_tokens_per_turn']} out/turn")
+    print(f"Oracle: primary {protocol['oracle']['primary']}; browser for {protocol['oracle']['browser_required_for']}")
     print(f"Worker episode ceiling before controls/retries: {development} development + {trial} admission + {audit} final = {development + trial + audit}")
-    print("Checked: arithmetic, stream binding, duplicate rejection, serialized resume, ties/losses, veto, protocol flags, document fences")
+    print("Checked: gate arithmetic (executed + familywise), budget consistency, stream binding, duplicate rejection, resume, ties/losses, veto, oracle/baseline/weave flags, document fences")
     print("NOT CHECKED: application behavior, runtime isolation, valid sampling assumptions, actual transfer, sponsor integrations")
 
 

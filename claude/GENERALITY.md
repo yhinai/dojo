@@ -100,33 +100,48 @@ Use log space in implementation. Persist wins, losses, ties, pair IDs, and the f
 
 The PACE paper motivates a per-candidate sequential acceptance test and explicitly limits its claim to the conditional paired null. It does not certify universal lesson correctness or automatically control an entire adaptive colony. [PACE primary source](https://arxiv.org/html/2606.08106v1)
 
-## 7. Explicit experiment-wide error allocation
+## 7. Error allocation: executed gate versus documented bound
 
-The full requested run has five learners × three rounds = **15 reserved candidate slots**. Allocate a total statistical false-promotion budget of 0.05 across those slots:
+The full run has five learners × three rounds = **15 reserved candidate slots**. Two error policies are defined; one is executed, the other is reported.
+
+### Executed gate — per candidate
+
+```text
+alpha_candidate = 0.05
+threshold       = 1 / alpha_candidate = 20
+```
+
+This is the guarantee the PACE construction actually provides: for a fixed candidate/comparator/protocol binding, the probability of a false promotion is at most 0.05 under the conditional paired null, under optional stopping.
+
+### Documented bound — familywise across 15 slots
 
 ```text
 alpha_total = 0.05
-alpha_slot = 0.05 / 15 = 1 / 300
-threshold_slot = 1 / alpha_slot = 300
+alpha_slot  = 0.05 / 15 = 1 / 300
+threshold   = 300
 ```
 
-If each slot's conditional bound is valid, a union bound limits the probability of at least one statistical false promotion across these 15 comparisons to at most 0.05. This is a conservative design extension; it is not a claim that the original PACE experiment established this system's guarantee.
+A union bound limits the probability of *any* statistical false promotion across the 15 comparisons to 0.05. It is reported alongside every admission decision (the UI shows whether each admitted candidate would also have crossed 300), but it is **not** the executed gate, for a reason that is quantitative, not cosmetic:
 
-The bound does not cover oracle bugs, task-distribution mismatch, dishonest event capture, hidden leakage, or unmeasured regressions. The UI must name it a statistical comparison bound under stated assumptions.
+| True lift (control → treatment) | P(admit) at 300 | P(admit) at 20 |
+|---|---|---|
+| +10pt (40 → 50) | 1.9% | 18.6% |
+| +20pt (40 → 60) | **15.8%** | **54.9%** |
+| +30pt (40 → 70) | 55.0% | 88.7% |
+| +40pt (40 → 80) | 91.9% | 99.3% |
+| null (no effect) | 0.07% | 3.1% |
 
-Unused slots are not silently reassigned after seeing evidence. Rewording a lesson, changing its scope, replacing its comparator, or rerunning after rejection uses a new reserved slot. If none remain, preserve the candidate as unadmitted for the next registered experiment.
+(Monte Carlo, λ = 0.5, 64 pairs, 20,000 trials per cell.) At threshold 300 a lesson with a large real effect is admitted about one time in six; a run at that setting most likely ends with an empty pool and no transfer to show. At threshold 20 the measured null false-admission rate stays under its 5% bound. Neither bound covers oracle bugs, distribution mismatch, dishonest capture, leakage, or unmeasured regressions.
 
-### Evidence feasibility
+### Evidence feasibility at the executed gate
 
-At these defaults:
+- 5 consecutive wins: E = 7.59, insufficient.
+- 7 consecutive wins: E ≈ 17.09, insufficient.
+- **8 consecutive wins: E ≈ 25.63, crosses 20.**
 
-- 5 consecutive wins: E = 7.59375, insufficient.
-- 14 consecutive wins: E ≈ 291.93, still insufficient.
-- 15 consecutive wins: E ≈ 437.89, crosses 300.
+Each loss multiplies E by 0.5 and costs roughly 1.7 wins of progress; ties contribute nothing. A candidate receives up to **64 fresh pairs**. A weak improvement can still remain unadmitted, and that outcome is reported as `INSUFFICIENT_EVIDENCE`, not hidden.
 
-A candidate receives up to **64 fresh pairs**. Ties use runtime budget but contribute no evidence; losses require additional wins. A weak improvement can remain unadmitted. Five agents and three rounds do not imply fifteen winning pairs.
-
-This fixes the old architecture's impossible five-host promotion while keeping statistical rigor. Do not reduce the threshold just to ensure that something appears in the pool during the demo.
+Unused slots are not reassigned after seeing evidence. Rewording a lesson, changing its scope, replacing its comparator, or rerunning after rejection uses a new reserved slot. The fixed bet λ = 0.5 is a known limitation on binary outcomes; an adaptive betting scheme from the e-process literature would raise power further and is a documented follow-up, not a mid-run change.
 
 ## 8. Admission decision
 

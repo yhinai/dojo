@@ -1,5 +1,5 @@
 {
-  "schema_version": "herd-learning-protocol-v1",
+  "schema_version": "herd-learning-protocol-v2",
   "status": "design_defaults_not_executed",
   "domain": "marimo",
   "population": {
@@ -15,19 +15,21 @@
     "docs_snapshot_hash": null,
     "max_tool_calls": 12,
     "max_submissions": 3,
-    "max_total_tokens": 12000,
     "max_wall_seconds": 180,
     "max_memory_envelope_tokens": 2000,
     "fresh_trial_sessions": true,
     "fresh_final_sessions": true,
-    "equal_tools_and_docs_across_arms": true
+    "equal_tools_and_docs_across_arms": true,
+    "max_output_tokens_per_turn": 1500,
+    "max_total_tokens": 80000,
+    "budget_note": "12 tool calls with a 2,000-token envelope and cumulative per-turn input cannot fit in 12,000 tokens; the per-turn output cap bounds spend, the episode total bounds runaway loops"
   },
   "admission": {
     "candidate_slots": 15,
     "max_bullets_per_package": 2,
     "max_pairs_per_candidate": 64,
     "alpha_total": 0.05,
-    "alpha_allocation": "equal_reserved_slots",
+    "alpha_allocation": "per_candidate_with_familywise_reported",
     "lambda": 0.5,
     "fresh_task_ids": true,
     "stream_binding_fields": [
@@ -43,7 +45,19 @@
     "requires_integrity_controls": true,
     "on_insufficient_evidence": "quarantine",
     "on_changed_binding": "new_reserved_slot",
-    "on_duplicate_pair": "reject_update"
+    "on_duplicate_pair": "reject_update",
+    "gate_mode": "per_candidate",
+    "alpha_candidate": 0.05,
+    "threshold_candidate": 20,
+    "familywise_reported": {
+      "alpha_total": 0.05,
+      "slots": 15,
+      "threshold": 300,
+      "note": "documented conservative extension; reported alongside, not the executed gate"
+    },
+    "power_note": "simulated at these defaults: +20pt true lift admits ~55% within 64 pairs at threshold 20 vs ~16% at threshold 300",
+    "candidate_evaluation": "parallel_independent_deltas_vs_round_start_pool",
+    "composition_check_before_commit": true
   },
   "retrieval": {
     "policy": "version_and_tag_overlap_then_admission_order_then_id",
@@ -54,10 +68,18 @@
     "tasks": 60,
     "template_families": 12,
     "worker_repeats": 3,
-    "arms": ["no_pool", "curated_docs", "raw_memory", "admitted_pool"],
+    "arms": [
+      "no_pool",
+      "curated_docs",
+      "raw_memory",
+      "admitted_pool"
+    ],
     "read_only_after_selection": true,
     "primary_metric": "budgeted_task_success",
-    "primary_comparison": ["admitted_pool", "no_pool"],
+    "primary_comparison": [
+      "admitted_pool",
+      "no_pool"
+    ],
     "interval_unit": "task_family_cluster"
   },
   "resources": {
@@ -73,5 +95,33 @@
     "inference_adapter": "required_provider_to_verify",
     "molab_hosting": "deployment_access_to_verify",
     "typesafe_adapter": "onsite_interface_to_verify"
+  },
+  "oracle": {
+    "primary": "headless_programmatic",
+    "primary_note": "tasks require named functions / cell outputs checkable under changed inputs via marimo's documented pytest integration and script-mode execution; verify against the pinned runtime",
+    "secondary": "browser_interaction",
+    "browser_required_for": [
+      "fresh_process_startup",
+      "one_registered_interaction",
+      "demo_live_probe"
+    ]
+  },
+  "baselines": {
+    "curated_docs_authored_before_round": 1,
+    "curated_docs_hash": null,
+    "raw_memory_selection_rule_hash": null,
+    "note": "both frozen and hashed before round one begins; contamination by development failures is otherwise unavoidable"
+  },
+  "weave": {
+    "paired_trials_as": "weave.Evaluation",
+    "pool_versions_as": "weave.Leaderboard",
+    "custom_scorers_for": [
+      "structure",
+      "startup",
+      "semantic_probe",
+      "interaction_probe",
+      "integrity"
+    ],
+    "traces_via": "@weave.op on attempt_task, repair_task, distill_lesson, retrieve_lessons, evaluate_pair, evaluate_notebook, decide_admission"
   }
 }

@@ -167,7 +167,9 @@ These are proposed application tools, not claimed native marimo APIs. The implem
 
 ### Episode limits
 
-Reference defaults: 12 worker tool calls, 3 notebook submissions, 12,000 combined input/output model tokens for the whole episode, and 180 seconds of worker wall time. Setup costs and evaluator time are recorded separately. A provider response that would exceed the remaining token allowance is bounded or terminates the episode.
+Reference defaults: 12 worker tool calls, 3 notebook submissions, **1,500 output tokens per turn**, **80,000 combined input/output tokens per episode**, and 180 seconds of worker wall time. Setup costs and evaluator time are recorded separately. A provider response that would exceed the per-turn or remaining episode allowance is bounded or terminates the episode.
+
+> **Why not 12,000 total.** A 2,000-token lesson envelope plus system prompt, task, notebook content, and docs results is roughly 3k on the first turn, and input is cumulative per turn; twelve tool calls is on the order of 100k tokens. A 12k episode cap effectively permits ~3 tool calls, most episodes would terminate on budget in every arm, both sides of each pair would fail, ties would dominate, and the gate would receive no evidence. The per-turn output cap bounds spend; the episode total bounds runaway loops. `within_worker_budget` must record *which* limit ended an episode so budget exhaustion is never silently scored as incompetence.
 
 Workers may repair within these limits in all arms. Report first-submission and budgeted final success separately. This avoids treating an extra retry as a benefit unique to the pool.
 
@@ -260,7 +262,13 @@ The evaluator checks four layers:
 3. Correct outputs for task fixtures.
 4. Required behavior after private input changes or form actions.
 
-For interactive tasks, the trusted browser controller drives actual widgets. It observes output values, rendered table contents, and declared task outcomes. Use semantic properties rather than screenshot similarity as the primary oracle. Screenshots and recordings are supporting evidence.
+### Primary oracle: headless and programmatic
+
+marimo notebooks are plain Python and marimo documents both pytest integration and script-mode execution. Tasks therefore **require named functions and named cell outputs** whose behaviour the evaluator checks directly under changed inputs — filter a table at two private thresholds, recompute a summary from a swapped fixture, confirm a form's committed value drives the result — without a browser. This is the oracle used for every admission pair and every final episode. It is deterministic, fast, parallel, and has no DOM dependency. Verify the exact invocation against the pinned marimo version before fixtures are registered.
+
+### Secondary oracle: browser interaction
+
+The trusted browser controller is retained for three things only: fresh-process startup (`marimo run` serves and renders), **one** registered interaction per interactive task as a reactivity check, and the live demo probe. It observes output values and rendered table contents; semantic properties, not screenshot similarity, are the comparison. Screenshots and recordings are supporting evidence. Keeping the browser off the per-pair critical path is deliberate: `mo.ui` frontend selectors are not a stable API, and a browser per sandbox per probe would be the slowest and most fragile component in the system.
 
 The official CLI documents `marimo check` and `marimo run`; the implementation must test the pinned version and select relevant check rules. A formatter warning need not invalidate a correct notebook unless the task explicitly requires that property. [CLI reference](https://docs.marimo.io/cli/)
 
@@ -303,7 +311,7 @@ Do not force-retrieve the candidate only in trials if normal retrieval would omi
 
 The admission stream draws from the candidate's frozen applicability distribution. Claims are scoped to that distribution. Separate fixed clean controls check broader non-interference. The final comparison measures the whole pool across the registered domain.
 
-There are at most 64 fresh task pairs per candidate. See [GENERALITY.md](GENERALITY.md) for evidence updates, familywise allocation, negative controls, and insufficient-evidence behavior.
+There are at most 64 fresh task pairs per candidate. The executed gate is per-candidate (α = 0.05, threshold 20); the 15-way familywise bound (threshold 300) is documented and reported alongside, not executed — at that threshold a +20-point lesson is admitted ~16% of the time within 64 pairs, which would leave the pool empty at demo time. See [GENERALITY.md](GENERALITY.md) for evidence updates, familywise allocation, negative controls, and insufficient-evidence behavior.
 
 ## 13. Pool states, transactions, and composition
 
@@ -318,7 +326,11 @@ PROPOSED → SCHEMA_CHECKED → QUARANTINED → EVALUATING
 
 Every state transition is written by the controller with an event ID and immutable evidence pointer. The pool service atomically appends a new manifest after verifying that the incumbent hash still matches the comparison's hash.
 
-Within each round, learners generate candidates against the round-start snapshot. Admission occurs in a predetermined learner-ID order against the latest accepted pool. If the incumbent changes before a candidate's evaluation begins, bind it to the new incumbent. If the candidate has already accumulated evidence under a different incumbent, do not reuse that evidence for the new composite claim. Re-evaluation consumes a new reserved slot or remains unadmitted.
+Within each round, learners generate candidates against the round-start snapshot **P_r**, and **all of a round's candidates are evaluated in parallel as independent deltas against P_r** — each stream binds to `incumbent_pool_hash = hash(P_r)`. Serial admission in learner-ID order against the latest accepted pool would make each candidate wait for the previous one's up-to-64 pairs; with five candidates that is the dominant wall-clock cost of the whole experiment, for a composite claim the demo does not need.
+
+Before commit, run the fixed composition and regression controls once against the **union** of admitted deltas plus P_r. If the union fails a control, retract the most recently admitted delta and re-run the controls; record every retraction. The resulting claim is "each admitted lesson helped against P_r and the union passed the registered controls" — not "each lesson helped against every other admitted lesson." State that scope. Exact composite evidence for a specific pair of lessons is a follow-up ablation with its own slot.
+
+If a candidate's evidence was accumulated under a different incumbent hash, do not reuse it. Re-evaluation consumes a new reserved slot or remains unadmitted.
 
 No new candidate slot is created for free by rewording an old lesson or restarting a failed trial.
 
@@ -349,7 +361,7 @@ The reference final plan uses 60 tasks across 12 held-out template families, fou
 | Arm | Memory envelope |
 |---|---|
 | No pool | None; normal public docs tool remains available. |
-| Curated docs | A fixed human-authored quick-reference derived from the same public docs, frozen before final evaluation. |
+| Curated docs | A fixed human-authored quick-reference derived from the same public docs, **authored, frozen, and hashed before round one begins** (`baselines.curated_docs_hash`). Authoring it after observing development failures would contaminate the baseline with the very experience the pool is being compared against. The raw-memory selection rule is likewise hashed before round one. |
 | Raw memory | Deterministically selected development experience excerpts, truncated to the same memory budget, with no admission filtering. |
 | Admitted pool | The final versioned pool through the frozen retriever. |
 
@@ -368,7 +380,7 @@ The reference upper bound before controls and provider retries is:
 - 720 final episodes;
 - total **2,685 worker episodes**, plus regression controls, distillation, curation, ARIA, and optional independent loop replications.
 
-A 12,000-token maximum per worker episode implies a theoretical worker ceiling of 32.22 million tokens before those extras. Actual usage may be much lower due to early stopping and shorter tasks. This is a capacity bound, not a purchase authorization or a cost estimate.
+An 80,000-token maximum per worker episode implies a theoretical worker ceiling of 214.8 million tokens before those extras. That is a capacity bound, not an estimate: the 1,500-token per-turn output cap, early stopping, and short tasks keep actual usage far lower, and on cheap W&B Inference models the *ceiling* is on the order of tens of dollars.
 
 Set verified provider/model prices and an explicit total dollar cap during preflight. The scheduler refuses new paid work if pricing/caps are absent or projected reservations exceed the cap. Architecture construction can finish while an experiment remains incomplete; report those separately.
 
@@ -393,7 +405,9 @@ Hash large artifacts separately. Retain notebook source, diagnostic output, inte
 
 ### Weave operations
 
-Instrument `attempt_task`, `repair_task`, `distill_lesson`, `retrieve_lessons`, `evaluate_pair`, `evaluate_notebook`, and `decide_admission`. Implement custom scorers for the semantic and interactive checks, and attach local evidence IDs to their results. Verify SDK signatures against the installed version before coding adapters. [Weave scorer documentation](https://docs.wandb.ai/weave/guides/evaluation/scorers)
+Instrument `attempt_task`, `repair_task`, `distill_lesson`, `retrieve_lessons`, `evaluate_pair`, `evaluate_notebook`, and `decide_admission` with `@weave.op`. Implement custom `Scorer` subclasses for structure, startup, semantic-probe, interaction-probe, and integrity checks, and attach local evidence IDs to their results.
+
+Use the native primitives, not only traces: **each candidate's paired admission stream is a `weave.Evaluation`** (dataset = the frozen task pairs, model = the worker configuration with and without the candidate delta, scorers = the behavioural checks), and **each committed pool version is a row on a `weave.Leaderboard`** keyed by pool hash. This gives evaluation rows, per-scorer summaries, and version comparison in the Weave UI for free, and it is what the Weave judges will look for. Verify SDK signatures against the installed version before coding adapters. [Weave scorer documentation](https://docs.wandb.ai/weave/guides/evaluation/scorers) · [Evaluations](https://docs.wandb.ai/weave/guides/core-types/evaluations) · [Leaderboards](https://docs.wandb.ai/weave/guides/core-types/leaderboards)
 
 Weave downtime must not lose authoritative results. Write local events before uploading; an outbox retries idempotently. An absent remote link is displayed as pending, not replaced by a guessed URL.
 
