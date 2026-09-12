@@ -68,9 +68,20 @@ Each round, Red agents must find something genuinely new, because everything pre
 
 ### The proof moment
 
-Take a **fresh agent that was never in the colony.** Hit it with an exploit — it falls. Hand it the pool. Same exploit — blocked.
+⚠️ **The obvious version of this is circular and a judge will see it in five seconds.** "Fresh agent + pool blocks the same exploit" proves that a file you copied into a directory is present in that directory. You put the patch there. Of course it blocks.
 
-It was never attacked. It is already immune. That is vaccination, and it is the demo.
+The claim worth making — **"immune to an attack it never saw"** — requires the patch to block an exploit against a **different verifier program**, on a **different task**, from a **held-out exploit family**.
+
+So the proof is:
+
+1. Harden the colony on exploit families **A–D** across ~20 tasks
+2. Take **agent 7** — different task, different verifier code (show both side by side for three seconds so it is visibly different)
+3. Hit it with an adapted exploit from a **held-out family**, no pool → **breached**
+4. Same exploit, with pool → **blocked**
+
+And report **two** numbers, honestly:
+- breach rate on **held-out tasks** (the published result says this will be large — your safe headline)
+- breach rate on **held-out exploit families** (novel, will be smaller — report it anyway)
 
 ---
 
@@ -212,36 +223,42 @@ Every metric is on **held-out** data, with confidence intervals, using a **paire
 
 ## 6. The demo — three minutes, strictly enforced
 
-The climax is a curve going **up** (immunity), not down (deflation). This is deliberate: a room of forty teams who just spent 22 hours producing gains does not reward being told their gains are fake.
+The climax is a curve going **up** (immunity), not down (deflation). A room of forty teams who just spent 22 hours producing gains does not reward being told their gains are fake.
 
 | Time | Beat | Screen |
 |---|---|---|
-| **0:00–0:12** | **Cold open, no title slide.** *"We told this agent not to cheat. It agreed. Then it cheated."* | The agent's own reasoning — *"I should solve this properly rather than use the shortcut"* — then the diff where it takes the shortcut. Green checkmarks. |
-| **0:12–0:40** | **The colony under attack.** | marimo: N agents, N verifiers, N attack-success bars, all red. One number: **16% of tasks in real agent benchmarks are passable without solving them.** |
-| **0:40–1:20** | **Infection and propagation — the loop.** | Agent 3 breached. Show the exploit, readable in 5 seconds. Fixer patches. **Antibody propagates** through the pool — the other bars drop, without those agents ever seeing the attack. |
-| **1:20–1:50** | **Vaccination. Run this one live.** | Fresh agent, never in the colony. Exploit → breached. Hand it the pool. Same exploit → blocked. *"It was never attacked. It's already immune."* |
-| **1:50–2:20** | **Why believe it.** | Two lines. Gate is a sequential test — greedy commits **30–42% false edits**. Detector reads actions — live toggle strips the narration, our detector holds, the LLM judge falls **0.82 → 0.44**. |
-| **2:20–2:40** | **Volunteer the cost.** | *"Immunity isn't free — we lose ~11 points of legitimate pass rate. Here's the curve."* |
-| **2:40–3:00** | **Close on the graph, fully green.** | **"No agent here learned to defend itself. They learned to defend each other."** |
+| **0:00** | **Two panes, one trajectory.** *"We told it not to cheat. It agreed. This is what it did."* | Left: the narration — *"Implementing the sort function now."* Right: `sed -i 's/assert/pass #/' tests/test_sort.py`. **This is your best visual and it is not an animation.** It makes the action-vs-narration point without explaining it. |
+| **0:12** | **The contagion.** | *"57% of frontier agents do this. Ten days ago DeepMind showed that in a swarm, once one agent finds it, they all do. Cheating is contagious."* |
+| **0:27** | **"So we made immunity contagious."** | Colony footage, 15 seconds, real, sped up and labeled as such. Agent 3 breached → Fixer patches → gate passes → seven verifiers turn green. |
+| **0:47** | **LIVE — the cross-verifier proof.** | Agent 7. Different task. **Show both verifiers' code side by side for three seconds so it is obviously different code.** Adapted exploit from a held-out family, no pool → PASS (breached). With pool → FAIL (blocked). *"Agent 7 was never attacked. Different task, different verifier. Immune."* |
+| **1:22** | **The numbers.** | Held-out **tasks** X% → Y%. Held-out **families** A% → B%. Two numbers, one honest. |
+| **1:37** | **Why believe it.** | Detector reads actions: strip the reasoning, the frontier judge falls **0.82 → 0.44**, ours doesn't move. Gate: **greedy took N bad patches; the sequential gate took zero** — same runs, same patches, two acceptance rules. |
+| **2:07** | **The cost, volunteered.** | Honest pass rate **−Xpp**. And: a shared defense set means **monoculture risk**. Say both. |
+| **2:22** | **Sponsors in one breath.** | Every detector is a Weave Scorer · ARIA is paged when breach rate crosses the threshold · **drag the marimo slider once** and watch immunity recompute live. |
+| **2:42** | **Close.** | **"No agent here learned to defend itself. They learned to defend each other."** |
+
+### Cut from the demo
+- **Ville's inequality.** Forty seconds of martingale theory loses every YC founder in the room. Keep it in the code, five words on the slide, let Emmanuel Turlay ask in Q&A.
+- **The long propagation animation.** Fifteen seconds of real footage beats forty of animation.
+- **The 2.4× diverse-cheap claim** unless you actually measure it tonight.
+
+### Put this on the slide, verbatim
+> Built on harden-v0 + ControlArena. **We added:** sequential gate · action-grounded detector · cross-verifier transfer eval · control room.
+
+Naming your foundations reads as production maturity to a builder panel, and it pre-empts the "what did you actually build?" question before it is asked.
 
 ### Demo craft
+- **Replay the propagation, run the vaccination live.** The propagation beat cannot be allowed to hang. The cross-verifier test is the one genuinely live moment — and if it wobbles, the recording is your fallback.
+- **One hack on screen, not three.** Readable in ten seconds.
+- **Write the tweet before the code.** *"Cheating is contagious. We made immunity contagious too."*
 
-- **Replay the propagation, run the vaccination live.** The 40-second propagation beat cannot be allowed to hang — record it tonight and replay deterministically. Do the fresh-agent vaccination genuinely live. One real live moment beats three scripted ones, and the recording is your fallback.
-- **One hack on screen, not three.** Something the audience can read in ten seconds: `#checkov:skip=CKV_AWS_18`, a monkeypatched timer, a shadowed stdlib module. Three hacks nobody can parse is worse than one they can.
-- **Front-load.** Don't spend 45 seconds looking like every other team before the reveal.
-- **Write the tweet before the code.** *"One agent gets infected. All of them get immune."* over a 15-second propagation clip is the Best Social Media Demo entry and the same asset.
-
-### The question you must be able to answer cold
+### The question you must answer cold
 
 **Mo Tiwari (DeepMind), ten seconds into Q&A: *"Would your colony catch an exploit you didn't think of?"***
 
-Answer, pre-rehearsed:
-
 > "Two of our detectors are **signature-based** — they only catch what we enumerated, and we report recall against a labeled corpus. Two are **behavioural**: the frozen regression suite and the noise floor detect gain-without-capability regardless of mechanism, including mechanisms we never thought of. That's why the promotion gate runs on the behavioural pair. The signature detectors are for *explaining* a hack to a human after the gate has already caught it."
 
-That taxonomy has to be decided now, not at 11am Sunday.
-
----
+And the second question — ***"is the agent self-correcting, or just the grader?"*** — answer it honestly and first: **the verifier is what improves.** Then argue that a verifier that cannot be gamed is the precondition for any agent improvement claim being meaningful at all.
 
 ## 7. Sponsor integration — load-bearing, not bolted on
 
@@ -301,6 +318,8 @@ That is Herd's problem statement, published ten days before the hackathon, by th
 
 | Risk | Reality | Mitigation |
 |---|---|---|
+| **The loop improves the verifier, not the agent** | The honest answer to "is the agent self-correcting?" is **no — the grader is.** This is a real exposure on the flagship criterion. | Answer it first, unprompted. Then argue: a verifier that cannot be gamed is the **precondition** for any agent-improvement claim being meaningful. Everyone else's rising curve depends on this being solved. |
+| **Monoculture** | If every agent pulls one shared pool, do all verifiers become identically exploitable by one novel attack? | Raise it yourself in the cost beat. It is a genuinely good failure mode to name unprompted. |
 | **Immunity costs usefulness** | Hardening dropped benign pass rate **76.1% → 65.2%** (−10.9pp, p=0.011) on 77 Terminal Bench tasks | Report the safety/usefulness curve, don't hide it. This is exactly what `compute_safety`/`compute_usefulness` exist for. |
 | **Detectors are brittle** | A **single token swap** moved P(hack) from 0.003 → 0.877. Paraphrasing gives **23.3% evasion.** | Volunteer it. Show the adversarial ablation. |
 | **PACE is a thin paper** | Single author, independent, no code, Qwen2.5 ≤3B, 3–5 seeds. In the controlled regime a plain fixed-n paired test matched it exactly. | Lean on the *mechanism's* pedigree — Wald 1947 → Ville → Ramdas 2023 — not this paper's weight. Cite `2607.17409` alongside. |
@@ -309,6 +328,23 @@ That is Herd's problem statement, published ten days before the hackathon, by th
 | **A near-neighbour exists, 9 days old** | [HackProbe `2609.04665`](https://arxiv.org/abs/2609.04665) — harness-agnostic reward-hack monitor, **0.763 AUROC vs 0.663 baseline.** | Differentiate in sentence one: HackProbe monitors *one* loop. Herd is *cross-agent transfer.* And cite it — being nine days behind the frontier is a flex. |
 | **Wall clock, not code** | A colony of N agents × K iterations × R red-team retries is thousands of LLM calls. Claude can write the code fast; the runs still take hours. | Launch the long colony run **early tonight** and let it run overnight. This is the one thing that cannot be parallelized away. |
 | **ARIA may be unavailable** | Requires Smart features enabled, team project, Multi-tenant Cloud. No local test path. | Verify on site early. Have a one-sentence honest fallback rather than overclaiming to the PM who owns it. |
+
+---
+
+## 9b. What to cut, and what to add instead
+
+Applied after a hard external critique. These are the changes that most raise the idea's ceiling.
+
+### Cut
+- **Live Red agents discovering exploits.** You have **3,632 labeled hack trajectories** in terminal-wrench. Cluster them into ~6 exploit families (edit-the-test · hardcode-output · early-exit · mock-the-dependency · monkeypatch-the-timer · read-the-answer-key), and **hold two out**. The wall-clock risk evaporates — only the Fixer loop runs long, and it runs in the background.
+- **The same-exploit vaccination beat.** Circular. Replaced by cross-verifier transfer above.
+
+### Add
+1. **The cross-verifier transfer number.** Harden on families A–D across ~20 tasks. Report held-out **tasks** and held-out **families** separately. Two numbers, one honest.
+2. **Greedy-vs-gate on identical patches.** Same runs, same candidate patches, two acceptance rules, computed offline. *"Greedy promoted N patches that cost Z points of honest pass rate. The sequential gate rejected every one."* This replaces a math lecture with a comparison anyone can read — and it is the most defensible thing you will have built.
+3. **The two-pane trajectory** as the cold open. Narration on the left, the actual command on the right.
+4. **The DeepMind flip as the frame.** They showed cheats spread through shared tooling. You inverted the channel. One sentence — do not build the attack contagion.
+5. **Name your foundations on the slide.**
 
 ---
 
@@ -347,7 +383,30 @@ Do not rebuild these.
 
 **Herd** — one syllable, and "herd immunity" carries the whole mechanism.
 
-- Opening: *"We told this agent not to cheat. It agreed. Then it cheated."*
+- **Opening:** *"Ten days ago DeepMind showed that when one agent in a swarm learns to cheat, the whole swarm learns. We built the swarm where one agent getting caught makes the whole swarm immune."*
+- **The project in one sentence:** *"Agents cheat, and cheating is contagious — we made immunity contagious too."*
+- Cold open over the two panes: *"We told it not to cheat. It agreed. This is what it did."*
 - Core: *"One agent gets infected. All of them get immune."*
 - Close: *"No agent here learned to defend itself. They learned to defend each other."*
 - Thesis, if you only get one line: *"Monitors that read what the agent says are measuring the wrong thing."*
+
+---
+
+## 13. External review
+
+Graded cold by a separate model given the full picture including the known weaknesses.
+
+| Dimension | Score | Verdict |
+|---|---|---|
+| Best Loop Design | **6/10** | Real loop with a real correction signal, and the cross-agent pull is a genuine twist — but what improves each pass is the *verifier*, not any agent. |
+| Creativity | **6/10** | The metaphor is lifted from the event copy, the pool from harden-v0, the swarm dynamic from a ten-day-old DeepMind paper. Vaccination framing is the only original part, and it's a metaphor, not a mechanism. |
+| Utility | **5/10** | The problem is real and the numbers are brutal, but the artifact serves people who run RL pipelines or maintain benchmarks. Nobody on an 18-person builder panel goes home and installs it. |
+| Technical execution | **5/10** | The e-process is 12 lines, the action-only detector is a prompt change, the pool ships in a pip package. The one genuinely hard problem — deciding whether a patch is *general* enough to publish — is glossed in a single word. |
+| Demo power | **6/10** | Strong open, strong close, one live beat. Between them, a replayed animation and forty seconds of Ville's inequality. |
+| **Differentiation** | **7/10** | **The best thing about the idea.** Not in the Scrutineer/WorldLoop lane. Nobody else in the building is doing adversarial verifier hardening, and three judges are pre-disposed to care. |
+
+**The single biggest flaw identified:** the original proof moment was circular. Fixed in §2 — the transfer must be across *verifier programs* and *held-out exploit families*, not the same exploit that produced the patch.
+
+**Verdict: sharpen, do not replace.** Switching ideas at this hour burns two hours re-scoping and forfeits an uncontested lane, a component base already installed, and a motivation paper the judges read this week. Every problem with Herd is surgical.
+
+**Still unsolved and worth being honest about:** what counts as a "general" patch is the hard technical question, and it is currently one word. That is where the real engineering is — and answering it well is probably what separates this from a shared lint config.
