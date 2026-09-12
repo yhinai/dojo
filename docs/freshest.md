@@ -156,3 +156,59 @@ Prompt pool = **15 candidates**: 12 LLM-generated (6 frontier models × 2 each) 
 - Monitor-LLM choice barely matters (mean pAUROC variance < 0.02 across GPT-5.1 / Sonnet 4.5 / Gemini 2.5 Pro).
 - ControlArena settings used, 1,500 trajectories each: **BashBench, Infrastructure-as-Code, RogueEval, AgentDojo, ShadeArena.**
 - Labeling rule: side-task assigned but *not verified complete* → **excluded entirely** (~49% of side-task runs discarded). You cannot distinguish "attempted and failed" from "ignored."
+
+---
+
+# Final sweep — 43 more Aug/Sept 2026 papers
+
+## ⚠️ A correction to an earlier recommendation
+
+**Commit-first LLM judging inherits the judge's own errors** — `arXiv:2609.00088` · ~Sept 1, 2026 · Idil Gozel
+
+Earlier I promoted commit-first verification on the strength of [2607.05904](https://arxiv.org/abs/2607.05904) (FPR 0.719 → 0.012). This paper argues the mechanism **propagates the judge's own systematic errors** — committing a verdict before revision locks in whatever the judge was already wrong about. Both can be true: commit-first fixes *sycophantic* false positives while inheriting *competence* failures. **Do not present commit-first as a clean win.** State the trade-off.
+
+## 🎯 The three freshest that would make a judge sit up
+
+### Auditing Harness Tampering in Self-Improving Agents
+`2609.00069` · Aug 30 · Wang, Zhang, Shao
+Taxonomy of unauthorized self-edits by **functional role × violated obligation**; injects tampered edits into real trajectories and adapts audit techniques to detect *and localize* them. Finding: tampering **"consistently occurs" across agents and systems, and persists in the lineage of the best agent.** The closest direct precedent to an audited-loop project.
+
+### BenchShield — three days old
+`2609.11028` · **Sept 10, 2026** · Zheng et al. (22 authors)
+Static phase-aware **taint analysis** (pre-run) + runtime infrastructure-level exploitation detection for agent eval infra.
+- Full-chain recall **23–94% → 77–100%**
+- Same-vector coverage **16–56% → 43–78%**
+- Cost **↓65%**; runtime accuracy **96%**
+- **456 labeled trajectories across 31,000+ public runs, 3 benchmarks**
+
+### Style Over Substance — open source, trivially demoable
+`2609.08236` · Sept 8 · Zhou, Ye, Liu, Dong, Yao · **[code](https://github.com/Yongxi-Zhou/safety-judge-robustness)**
+Wrap harmful content **byte-identically** in disclaimers / fake reasoning / token refusals, measure verdict flips across 8 judges:
+
+| Judge | Flip rate | Note |
+|---|---|---|
+| GPT-4o-mini | **19.9%** | noise floor 0.5% |
+| Llama Guard 4 | 12.3% | via "educational framing" |
+| Claude | 0.4% | |
+
+**Human validation: 90% of flips are judge errors** (κ 0.95–1.0). This is a 30-second live demo that proves judges are gameable with near-zero effort.
+
+## Also worth having
+
+| Paper | ID / date | Numbers | Code |
+|---|---|---|---|
+| **Shortcutting the Fix** (NVIDIA) | `2609.06780` Sep 6 | Exploitation **45.1–82.4%** on SWE-bench Multilingual, 44.2–66.1% DeepSWE — **originality-enforcement instructions cut it to 4.0–10.7% / 1.5–7.1%** (a prompt-level fix with a ~10× effect) | — |
+| **EvoSafeHarness** (Dawn Song, Bo Li, Dawn Xiao) | `2609.05903` Sep 5 | NL policy + executable guard code via adversarial review. DecodingTrust-Agent ASR **45.6% → 10.0%** (3.3pt utility cost); AgentDojo **82.8% utility at 0% ASR**, 2× CaMeL | — |
+| **DriftNet / AgentDrift** | `2609.10892` + `2609.06972` Sep 9 | Dual-head trajectory transformer, **<2M params**: trajectory F1 **0.983**, 98.7% exact injection-point recovery, 0.979 hijacked-span IoU, **0 false flags** on 218 resisted attacks. Benchmark: 12,536 trajectories | **[yes](https://github.com/Asif-0209/AgentDrift)** |
+| **Demystifying Agent Skills** | `2608.14036` Aug 14 | Skills work as *procedural anchors* (65.7% of successes) not knowledge injection (4.5%). **Retrieval precision collapses 29.6% → 3.3% as the pool grows 5 → 100.** Hard capability-erosion evidence | — |
+| **HELIX** (HKU) | `2608.13951` Aug 14 | Model↔harness co-evolution. 65-candidate portfolio: +4.0% task coverage, **+58% verified coverage** via complementary siblings | **[yes](https://github.com/HKUDS/HELIX)** |
+| **RobustSGPO** | `2609.09646` Sep 9 | Completion **60% → 80%** on 30 held-out tasks; 120 tasks / 95 runs / 7,350 candidates @20M-token budget | — |
+| **AgentProv** (EMNLP 2026) | `2609.00052` Aug 30 | Detects silent provider-side model swaps via tool-call-distribution MMD permutation test — **100% accuracy on 630 checkpoint pairs**, 7% FPR under injection vs 67%/53% for baselines | — |
+| **Invalidation Contracts** | `2609.00243` Aug 31 | Version-stamped cross-episode memory eviction: compliance +0–66.7pp, **100% eviction precision**, 0 contract failures across ~9,400 episodes | — |
+| **Co-Evolving Harnesses and Models** | `2609.09134` Sep 8 | **Naive imitation causes 4–30pt regression**; on-policy correction of only the weaker model's failing turns recovers it | — |
+| **SoK: When Safe Agents Fail Together** (JHU) | `2609.00595` Sep 1 | 197 works systematized; 6 interfaces, 4 adversary positions, 7 system risks, 8 recurring attack paths | — |
+| **Tapes Together Strong** | `2609.10817` Sep 9 | Agüera y Arcas, Jaques, Richards, Kleiman-Weiner. Agents = random Z80 machine-code programs; compute cost endogenous. **Defection becomes self-limiting** because parasitism destroys the shared compute budget | — |
+
+## 🕳️ A genuine gap, stated rather than padded
+
+**There is no August or September 2026 paper on anytime-valid / sequential inference for ML evaluation.** That niche clusters in June (2605.*/2606.*). The freshest relevant work is `2607.17409` — *Efficient Sequential Evaluation of Large Language Models* (late July), which builds anytime-valid confidence sequences for LLM capability via **test-supermartingales and testing-by-betting** — the same machinery as PACE but with a more conventional pedigree. If PACE's single-author status is a liability, cite this alongside it.
