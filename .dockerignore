@@ -1,0 +1,6 @@
+*
+!src
+!src/herd
+!src/herd/adapters
+!src/herd/adapters/runner.py
+!Dockerfile

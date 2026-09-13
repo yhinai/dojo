@@ -1,0 +1,20 @@
+name: Verify deployment package
+on: [push, pull_request]
+jobs:
+  deployment:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv sync --frozen --extra dev --extra weave
+      - run: sh -n deploy/install.sh
+      - name: Validate Linux service units with actual executable paths
+        run: |
+          sudo mkdir -p /opt/herd/.venv/bin /var/lib/herd /etc/herd
+          sudo ln -s "$PWD/.venv/bin/herd" /opt/herd/.venv/bin/herd
+          sudo ln -s "$PWD/.venv/bin/marimo" /opt/herd/.venv/bin/marimo
+          sudo cp app/control_room.py /var/lib/herd/control_room.py
+          sudo cp deploy/herd.env.example /etc/herd/herd.env
+          sudo systemd-analyze verify deploy/herd-api.service deploy/herd-dashboard.service
+      - run: uv run pytest tests/test_delivery.py -q
+      - run: python3 deploy/verify_proxy.py

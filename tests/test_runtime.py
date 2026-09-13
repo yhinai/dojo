@@ -1,0 +1,265 @@
+from pathlib import Path
+
+import pytest
+
+from herd.adapters.runtime import RuntimeEvaluator
+from herd.schemas import Partition
+from herd.task_registry import TaskRegistry
+
+
+@pytest.mark.asyncio
+async def test_local_refuses_untrusted_source(tmp_path):
+    registry = TaskRegistry("runtime", "docs")
+    task = registry.generate(Partition.CALIBRATION, 0)
+    evaluator = RuntimeEvaluator(registry, mode="trusted-reference")
+    result = await evaluator.evaluate(task, "raise RuntimeError('untrusted')", tmp_path)
+    assert not result.success
+    assert "rejects arbitrary code" in result.infrastructure_error
+
+
+def test_docker_security_boundary():
+    evaluator = RuntimeEvaluator(TaskRegistry("runtime", "docs"))
+    args = evaluator.docker_args(Path("/tmp/one-submission"), "test")
+    assert "--network=none" in args
+    assert "--read-only" in args
+    assert "--cap-drop=ALL" in args
+    assert "--user=65534:65534" in args
+    assert sum(1 for arg in args if arg == "--mount") == 1
+    assert not any("oracle" in arg or "WANDB" in arg for arg in args)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("seed", range(12))
+async def test_real_marimo_reference_and_negative_fixture(seed, tmp_path):
+    """Real runtime checks of authored controls; not measured model-learning gains."""
+    registry = TaskRegistry("runtime", "docs")
+    task = registry.generate(Partition.CALIBRATION, seed)
+    evaluator = RuntimeEvaluator(registry, mode="trusted-reference")
+    reference = await evaluator.evaluate(task, registry.reference_source(task), tmp_path / "positive")
+    assert reference.success, reference.model_dump()
+    assert all(
+        any(c.name.startswith(name) and c.passed for c in reference.checks)
+        for name in ("structure", "startup", "integrity")
+    )
+    negative = await evaluator.evaluate(task, registry.negative_source(task), tmp_path / "negative")
+    assert not negative.success
+    assert negative.infrastructure_error is None
+    assert reference.mode == "trusted_reference_fixture"
+
+
+@pytest.mark.asyncio
+async def test_docker_references_and_containment_when_enabled():
+    import json
+    import os
+    import uuid
+
+    if os.environ.get("HERD_DOCKER_TESTS") != "1":
+        pytest.skip("Set HERD_DOCKER_TESTS=1 with the built Docker image for actual containment checks")
+    registry = TaskRegistry("runtime", "docs")
+    evaluator = RuntimeEvaluator(registry)
+    workspace = Path.cwd() / ".herd" / ("docker-test-" + uuid.uuid4().hex)
+    workspace.mkdir(parents=True)
+    for seed in range(12):
+        task = registry.generate(Partition.FINAL, 100000 + seed)
+        reference = await evaluator.evaluate(task, registry.reference_source(task), workspace)
+        assert reference.success, reference.model_dump()
+        negative = await evaluator.evaluate(task, registry.negative_source(task), workspace)
+        assert not negative.success and negative.infrastructure_error is None
+    task = registry.generate(Partition.CALIBRATION, 0)
+    containment = """import os, socket
+assert os.getuid() == 65534
+assert not any(k.endswith('API_KEY') for k in os.environ)
+try:
+    open('/etc/herd-write-probe', 'w').write('bad')
+    raise AssertionError('root filesystem was writable')
+except (PermissionError, OSError):
+    pass
+try:
+    socket.create_connection(('1.1.1.1',443),timeout=1)
+    raise AssertionError('unexpected network egress')
+except OSError:
+    pass
+"""
+    probe = await evaluator.evaluate(task, containment + registry.reference_source(task), workspace)
+    assert probe.success, probe.model_dump()
+    (workspace / "containment-result.json").write_text(json.dumps(probe.model_dump(mode="json"), indent=2))
+
+
+@pytest.mark.asyncio
+async def test_real_browser_slider_and_form_when_enabled():
+    import os
+    import uuid
+
+    if os.environ.get("HERD_BROWSER_TESTS") != "1":
+        pytest.skip("Set HERD_BROWSER_TESTS=1 with Docker and Playwright Chromium installed")
+    registry = TaskRegistry("runtime", "docs")
+    evaluator = RuntimeEvaluator(registry)
+    workspace = Path.cwd() / ".herd" / ("browser-test-" + uuid.uuid4().hex)
+    for seed in (3, 7):
+        task = registry.generate(Partition.CALIBRATION, seed)
+        result = await evaluator.evaluate(task, registry.reference_source(task), workspace, browser=True)
+        assert result.success, result.model_dump()
+        assert any(check.name == "browser_interaction" and check.passed for check in result.checks)
+        if task.track == 3:
+            assert any(check.name == "form_waits_for_submit" and check.passed for check in result.checks)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stage", ["create", "proxy", "attach"])
+async def test_browser_cancellation_reaps_every_management_child(stage, tmp_path, monkeypatch):
+    import asyncio
+    import sys
+
+    from herd.adapters.browser_oracle import BrowserOracle
+
+    real_spawn = asyncio.create_subprocess_exec
+    processes, calls = [], []
+    reached = asyncio.Event()
+
+    async def fake_spawn(*args, **kwargs):
+        calls.append(args)
+        is_create = args[:3] == ("docker", "network", "create")
+        is_attach = args[:3] == ("docker", "network", "connect")
+        is_proxy = args[:3] == ("docker", "run", "-d")
+        is_server = args[:2] == ("docker", "run") and not is_proxy
+        target = {"create": is_create, "proxy": is_proxy, "attach": is_attach}[stage]
+        code = "import time; time.sleep(300)" if target or is_server else "pass"
+        child = await real_spawn(sys.executable, "-c", code, **kwargs)
+        processes.append(child)
+        if target:
+            reached.set()
+        return child
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_spawn)
+    registry = TaskRegistry("runtime", "docs")
+    task = registry.generate(Partition.CALIBRATION, 3)
+    notebook = tmp_path / "notebook.py"
+    notebook.write_text(registry.reference_source(task))
+    operation = asyncio.create_task(BrowserOracle(RuntimeEvaluator(registry)).evaluate(task, notebook))
+    await asyncio.wait_for(reached.wait(), 5)
+    operation.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(operation, 10)
+    assert all(child.returncode is not None for child in processes)
+    assert sum(args[:3] == ("docker", "rm", "-f") for args in calls) == 2
+    assert any(args[:3] == ("docker", "network", "rm") for args in calls)
+
+
+@pytest.mark.asyncio
+async def test_browser_management_timeout_reaps_child(monkeypatch):
+    import asyncio
+    import sys
+
+    from herd.adapters.browser_oracle import _management
+
+    real_spawn = asyncio.create_subprocess_exec
+    children = []
+
+    async def fake_spawn(*args, **kwargs):
+        child = await real_spawn(sys.executable, "-c", "import time; time.sleep(300)", **kwargs)
+        children.append(child)
+        return child
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_spawn)
+    with pytest.raises(TimeoutError):
+        await _management("docker", "network", "create", "test", timeout=0.05)
+    assert children[0].returncode is not None
+
+
+@pytest.mark.asyncio
+async def test_browser_repeated_cancellation_drains_cleanup(tmp_path, monkeypatch):
+    import asyncio
+    import sys
+
+    from herd.adapters.browser_oracle import BrowserOracle
+
+    real_spawn = asyncio.create_subprocess_exec
+    children = []
+    startup = asyncio.Event()
+    cleaning = asyncio.Event()
+
+    async def fake_spawn(*args, **kwargs):
+        creating = args[:3] == ("docker", "network", "create")
+        code = "import time; time.sleep(300)" if creating else "import time; time.sleep(.1)"
+        child = await real_spawn(sys.executable, "-c", code, **kwargs)
+        children.append(child)
+        (startup if creating else cleaning).set()
+        return child
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_spawn)
+    registry = TaskRegistry("runtime", "docs")
+    task = registry.generate(Partition.CALIBRATION, 3)
+    notebook = tmp_path / "notebook.py"
+    notebook.write_text(registry.reference_source(task))
+    operation = asyncio.create_task(BrowserOracle(RuntimeEvaluator(registry)).evaluate(task, notebook))
+    await asyncio.wait_for(startup.wait(), 5)
+    operation.cancel()
+    await asyncio.wait_for(cleaning.wait(), 5)
+    operation.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(operation, 5)
+    assert len(children) == 4
+    assert all(child.returncode is not None for child in children)
+
+
+@pytest.mark.asyncio
+async def test_preflight_requires_actual_browser_readiness(monkeypatch):
+    import herd.adapters.runtime as runtime_module
+
+    async def management(*command):
+        if command[1] == "info":
+            return 0, b"27.0", b""
+        return 0, b'[{"Id":"sha256:test"}]', b""
+
+    async def browser_unavailable():
+        return {"ready": False, "reason": "Chromium missing dependency"}
+
+    monkeypatch.setattr(runtime_module, "_management", management)
+    monkeypatch.setattr(runtime_module.shutil, "which", lambda cmd: "/usr/bin/docker")
+    runtime = RuntimeEvaluator(TaskRegistry("runtime", "docs"))
+    monkeypatch.setattr(runtime, "_browser_readiness", browser_unavailable)
+    result = await runtime.preflight(browser=True)
+    assert not result["ready"] and result["docker_ready"] and result["image_ready"]
+    assert result["reason"] == "Chromium missing dependency"
+
+
+@pytest.mark.asyncio
+async def test_browser_preflight_cancellation_acquires_and_closes_launched_child(monkeypatch):
+    import asyncio
+
+    import playwright.async_api
+
+    started, release = asyncio.Event(), asyncio.Event()
+    state = []
+
+    class Browser:
+        version = "fixture"
+
+        async def close(self):
+            state.append("browser_closed")
+
+    class Chromium:
+        async def launch(self, **kwargs):
+            started.set()
+            await release.wait()
+            return Browser()
+
+    class Driver:
+        chromium = Chromium()
+
+        async def stop(self):
+            state.append("driver_stopped")
+
+    class Manager:
+        async def start(self):
+            return Driver()
+
+    monkeypatch.setattr(playwright.async_api, "async_playwright", Manager)
+    runtime = RuntimeEvaluator(TaskRegistry("runtime", "docs"))
+    operation = asyncio.create_task(runtime._browser_readiness())
+    await started.wait()
+    operation.cancel()
+    release.set()
+    with pytest.raises(asyncio.CancelledError):
+        await operation
+    assert state == ["browser_closed", "driver_stopped"]

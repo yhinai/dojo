@@ -1,0 +1,21 @@
+[Unit]
+Description=HERD marimo control room
+After=herd-api.service
+[Service]
+Type=simple
+User=herd
+Group=herd
+WorkingDirectory=/opt/herd
+EnvironmentFile=/etc/herd/herd.env
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/opt/herd/.venv/bin/marimo run /var/lib/herd/control_room.py --host 127.0.0.1 --port 2718 --headless
+Restart=on-failure
+RestartSec=5
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/herd
+[Install]
+WantedBy=multi-user.target

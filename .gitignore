@@ -1,2 +1,13 @@
 __pycache__/
 *.pyc
+.venv/
+.env
+.env.*
+!.env.example
+experiments/
+.pytest_cache/
+.ruff_cache/
+.DS_Store
+
+.herd/
+__marimo__/
