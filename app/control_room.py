@@ -18,7 +18,13 @@ def _():
 
     import httpx
     import marimo as mo
-    return difflib, html, httpx, json, math, mo, os, quote
+    def fetch_evidence(path):
+        response = httpx.get(os.getenv("HERD_API_URL", "http://127.0.0.1:8000").rstrip("/") + path,
+                            headers={"X-Herd-Token": os.getenv("HERD_CONTROL_TOKEN", "")},
+                            auth=httpx.BasicAuth(os.getenv("HERD_API_BASIC_USER", ""), os.getenv("HERD_API_BASIC_PASSWORD", "")) if os.getenv("HERD_API_BASIC_USER") else None, timeout=15)
+        response.raise_for_status()
+        return response.json()
+    return difflib, fetch_evidence, html, httpx, json, math, mo, os, quote
 
 
 @app.cell
@@ -79,7 +85,16 @@ def _(demo_mode, experiments, mo, refresh, service_error):
 
 
 @app.cell
-def _(api_url, experiment_picker, httpx, os, quote, refresh):
+def _(mo):
+    attempt_offset = mo.ui.number(start=0, step=100, value=0, label="Attempt page offset (100 per page)")
+    event_after = mo.ui.number(start=0, step=100, value=0, label="Event sequence after")
+    load_report = mo.ui.run_button(label="Load full final report")
+    mo.hstack([attempt_offset, event_after, load_report])
+    return attempt_offset, event_after, load_report
+
+
+@app.cell
+def _(api_url, attempt_offset, event_after, experiment_picker, fetch_evidence, httpx, os, quote, refresh):
     refresh.value
     selected_id = experiment_picker.value
     detail = {}
@@ -89,6 +104,10 @@ def _(api_url, experiment_picker, httpx, os, quote, refresh):
             _response = httpx.get(f"{api_url}/api/experiments/{quote(selected_id, safe='')}", headers={"X-Herd-Token": os.getenv("HERD_CONTROL_TOKEN", "")}, auth=httpx.BasicAuth(os.getenv("HERD_API_BASIC_USER", ""), os.getenv("HERD_API_BASIC_PASSWORD", "")) if os.getenv("HERD_API_BASIC_USER") else None, timeout=10)
             _response.raise_for_status()
             detail = _response.json()
+            _page = fetch_evidence(f"/api/experiments/{quote(selected_id, safe='')}/attempts?offset={int(attempt_offset.value)}&limit=100")
+            detail['attempts'] = _page['items']
+            detail['attempt_page'] = {k: v for k, v in _page.items() if k != 'items'}
+            detail['events'] = fetch_evidence(f"/api/experiments/{quote(selected_id, safe='')}/events?after={int(event_after.value)}&limit=100")['items']
         except (httpx.HTTPError, ValueError) as _exc:
             detail_error = f"Unable to load experiment ({type(_exc).__name__}). No prior state is presented as current."
     return detail, detail_error, selected_id
@@ -197,15 +216,20 @@ def _(detail, gate_picker, gates, math, mo, replay_threshold):
 
 
 @app.cell
-def _(attempts, mo):
+def _(attempts, detail, mo):
     attempt_picker = mo.ui.dropdown(options={a['run_id']: a['run_id'] for a in attempts}, label="Notebook attempt")
-    mo.vstack([mo.Html('<h2 class="herd-section">Inspect the work.</h2>'), attempt_picker])
+    mo.vstack([mo.Html('<h2 class="herd-section">Inspect the work.</h2>'), attempt_picker, mo.md(f"Showing up to 100 attempts of {detail.get('attempt_page', {}).get('total', 0)}; learner cards reflect this selected page.")])
     return (attempt_picker,)
 
 
 @app.cell
-def _(attempt_picker, attempts, difflib, json, mo):
-    _attempt = next((a for a in attempts if a['run_id'] == attempt_picker.value), None)
+def _(attempt_picker, difflib, fetch_evidence, httpx, json, mo, quote, selected_id):
+    _attempt = None
+    if selected_id and attempt_picker.value:
+        try:
+            _attempt = fetch_evidence(f"/api/experiments/{quote(selected_id, safe='')}/attempts/{quote(attempt_picker.value, safe='')}")
+        except httpx.HTTPError:
+            pass
     if _attempt:
         _before = _attempt.get('initial_source', '')
         _after = _attempt.get('source', '')
@@ -222,14 +246,19 @@ def _(attempt_picker, attempts, difflib, json, mo):
 
 
 @app.cell
-def _(detail, mo):
-    _report = detail.get('report')
+def _(fetch_evidence, httpx, load_report, mo, quote, selected_id):
+    _report = None
+    if selected_id and load_report.value:
+        try:
+            _report = fetch_evidence(f"/api/experiments/{quote(selected_id, safe='')}/report")
+        except httpx.HTTPError:
+            pass
     _rows = []
     if _report:
         for _arm, _metrics in _report.get('arms', {}).items():
             _rows.append({'arm': _arm, **{k: v for k, v in _metrics.items() if not isinstance(v, (dict, list))}})
     mo.vstack([mo.Html('<h2 class="herd-section">Does the lesson travel?</h2>'),
-               mo.md('Fresh workers · no pool / curated docs / raw memory / admitted pool'),
+               mo.md('Fresh workers · no pool / curated docs / raw memory / admitted pool. Use Load full final report above; large evidence is fetched on demand.'),
                mo.ui.table(_rows, selection=None) if _rows else mo.Html('<div class="herd-empty">No final comparison yet. Success rates, family-clustered intervals, and costs remain unmeasured.</div>'),
                mo.ui.table([{k: v for k, v in value.items() if k != 'paired_outcomes'} | {'comparison': key} for key, value in _report.get('comparisons', {}).items()], selection=None) if _report else mo.md(''),
                mo.md('\n'.join('- ' + note for note in _report.get('limitations', []))) if _report else mo.md('')])
@@ -308,6 +337,29 @@ def _(detail, json, mo):
                   'Deliberately false lessons · separate diagnostic evidence': mo.ui.code_editor(value=json.dumps({'controls': detail.get('negative_controls', []), 'gates': detail.get('control_gates', [])}, indent=2), language='json', disabled=True),
                   'Draft review records': mo.ui.table(detail.get('draft_reviews', []), selection=None) if detail.get('draft_reviews') else mo.md('No draft reviews recorded.'),
                   'Published evidence links': mo.ui.table(detail.get('weave_links', []), selection=None) if detail.get('weave_links') else mo.md('No remote publication acknowledged.')})
+    return
+
+
+@app.cell
+def _(mo):
+    collection_picker = mo.ui.dropdown(options=['lesson_history', 'weave_link', 'pair', 'gate', 'draft_review', 'aria_analysis', 'calibration'], value='lesson_history', label='Evidence collection')
+    collection_offset = mo.ui.number(start=0, step=100, value=0, label='Collection offset')
+    load_collection = mo.ui.run_button(label='Load evidence page')
+    load_hook = mo.ui.run_button(label='Load round-one failure clusters')
+    mo.vstack([mo.md('Full evidence archive · fetch a bounded page on demand'), mo.hstack([collection_picker, collection_offset, load_collection, load_hook])])
+    return collection_picker, collection_offset, load_collection, load_hook
+
+
+@app.cell
+def _(collection_picker, collection_offset, fetch_evidence, httpx, json, load_collection, load_hook, mo, quote, selected_id):
+    _archive = {}
+    if selected_id and (load_collection.value or load_hook.value):
+        try:
+            _path = f"/api/experiments/{quote(selected_id, safe='')}"
+            _archive = fetch_evidence(_path + '/failure-clusters' if load_hook.value else _path + f'/collections/{collection_picker.value}?offset={int(collection_offset.value)}&limit=100')
+        except httpx.HTTPError:
+            _archive = {'error': 'Evidence fetch failed; no cached evidence substituted'}
+    mo.ui.code_editor(value=json.dumps(_archive, indent=2), language='json', disabled=True)
     return
 
 

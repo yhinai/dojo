@@ -36,7 +36,7 @@ class GatewayConfig:
     project: str = ""
     input_per_million: float = 0.13
     output_per_million: float = 0.28
-    cap_usd: float = 10.0
+    cap_usd: float = 25.0
     pricing_source: str = "https://site.wandb.ai/pricing/tokens/"
     pricing_verified_at: str = "2026-09-13"
     timeout_seconds: float = 65
@@ -70,7 +70,7 @@ class GatewayConfig:
             project=os.getenv("WANDB_PROJECT", ""),
             input_per_million=float(os.getenv("HERD_INPUT_PRICE_PER_MILLION", ".13")),
             output_per_million=float(os.getenv("HERD_OUTPUT_PRICE_PER_MILLION", ".28")),
-            cap_usd=float(os.getenv("HERD_DOLLAR_CAP", "10")),
+            cap_usd=float(os.getenv("HERD_DOLLAR_CAP", "25")),
             pricing_source=os.getenv("HERD_PRICING_SOURCE", cls.pricing_source),
             pricing_verified_at=os.getenv("HERD_PRICING_VERIFIED_AT", cls.pricing_verified_at),
         )

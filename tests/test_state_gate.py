@@ -37,7 +37,7 @@ def test_gate_threshold_and_familywise():
 
 
 def test_binding_duplicate_and_budget():
-    state = GateState(trial_id="trial", slot_id=0, binding=binding(), max_pairs=2)
+    state = GateState(trial_id="trial", slot_id=0, binding=binding(), max_pairs=2, alpha=0.5)
     original = pair(0, state)
     state = update_gate(state, original)
     with pytest.raises(ValueError, match="Duplicate"):
@@ -111,3 +111,16 @@ def test_terminal_state_and_pair_contract_reject_unknown():
     payload["treatment_run_id"] = payload["control_run_id"]
     with pytest.raises(ValidationError, match="distinct"):
         PairOutcome(**payload)
+
+
+def test_unreachable_threshold_stops_before_budget_exhaustion():
+    state = GateState(trial_id="early", slot_id=0, binding=binding(), controls_passed=True)
+    for i in range(64):
+        state = update_gate(state, pair(i, state, win=False))
+        if state.decision != "evaluating":
+            break
+    assert state.decision == "insufficient_evidence"
+    assert len(state.pair_ids) < 64
+    assert "unreachable" in state.reason
+    remaining = state.max_pairs - len(state.pair_ids)
+    assert state.log_e + remaining * math.log1p(state.bet) < math.log(1 / state.alpha)

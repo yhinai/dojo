@@ -37,12 +37,65 @@ class Store:
             ).fetchall()
         return [json.loads(r[0]) for r in rows]
 
-    def experiments(self):
+    def page(self, experiment, kind, limit=100, offset=0):
+        with self.lock:
+            rows = self.db.execute(
+                "SELECT payload FROM objects WHERE experiment=? AND kind=? ORDER BY rowid LIMIT ? OFFSET ?",
+                (experiment, kind, limit, offset),
+            ).fetchall()
+            total = self.db.execute(
+                "SELECT count(*) FROM objects WHERE experiment=? AND kind=?", (experiment, kind)
+            ).fetchone()[0]
+        return {
+            "items": [json.loads(r[0]) for r in rows],
+            "total": total,
+            "next_offset": offset + len(rows) if offset + len(rows) < total else None,
+        }
+
+    def event_page(self, experiment, after=0, limit=100):
+        with self.lock:
+            rows = self.db.execute(
+                "SELECT payload FROM events WHERE experiment=? AND sequence>? ORDER BY sequence LIMIT ?",
+                (experiment, after, limit),
+            ).fetchall()
+        items = [json.loads(r[0]) for r in rows]
+        return {"items": items, "next_after": items[-1]["sequence"] if items else after}
+
+    def reconcile_abandoned(self):
+        """Only alter running records while holding the global scheduler lease.
+
+        An external CLI scheduler holds this same lease, so API startup cannot
+        misclassify its active experiment as abandoned.
+        """
+        recovered = []
+        try:
+            with self.execution_lock():
+                for exp in self.experiments():
+                    if exp.get("status") == "running":
+                        self.put(
+                            exp["id"],
+                            "experiment",
+                            exp["id"],
+                            {**exp, "status": "paused", "pause_reason": "scheduler_process_lost"},
+                            expected=exp,
+                        )
+                        self.event(
+                            exp["id"],
+                            "recovery.abandoned_scheduler",
+                            {"action": "paused", "reservations": "preserved"},
+                        )
+                        recovered.append(exp["id"])
+        except RuntimeError:
+            pass
+        return recovered
+
+    def experiments(self, limit=None, offset=0):
         with self.lock:
             return [
                 json.loads(r[0])
                 for r in self.db.execute(
-                    "SELECT payload FROM objects WHERE kind='experiment' ORDER BY rowid DESC"
+                    "SELECT payload FROM objects WHERE kind='experiment' ORDER BY rowid DESC LIMIT ? OFFSET ?",
+                    (-1 if limit is None else limit, offset),
                 )
             ]
 

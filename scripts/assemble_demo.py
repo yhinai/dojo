@@ -46,7 +46,9 @@ def assemble(store: Store, experiment_id: str, task_id: str, directory: Path) ->
         pending.append('Authentic ARIA analysis not attached.')
     pending.extend(['Live slider probe and exact port must be rehearsed.',
                     'Three-minute recording and under-two-minute submission video not produced by this script.'])
-    bundle = {'schema': 'herd-demo-v1', 'experiment_id': experiment_id, 'created_at': utcnow(),
+    from herd.reports import first_failure_clusters
+    hook = first_failure_clusters(attempts, {t['task_id'] for t in tasks.values() if t['partition'] == 'development'})
+    bundle = {'round_one_hook': hook, 'schema': 'herd-demo-v1', 'experiment_id': experiment_id, 'created_at': utcnow(),
               'mode': 'measured_evidence_replay', 'task_selection': 'explicit_task_id_not_outcome_selected',
               'task': task, 'experiment': experiment, 'demonstration_pair': pair,
               'attempts': attempts, 'lessons': lessons, 'gates': gates,
@@ -63,6 +65,7 @@ def assemble(store: Store, experiment_id: str, task_id: str, directory: Path) ->
             artifacts[arm] = {'path': path.name, 'source_hash': digest(source), 'run_id': attempt['run_id']}
     bundle['notebook_artifacts'] = artifacts
     bundle['bundle_hash'] = digest(bundle)
+    (directory / 'round-one-failure-clusters.json').write_text(json.dumps(hook, indent=2))
     (directory / 'manifest.json').write_text(json.dumps(bundle, indent=2))
     return bundle
 

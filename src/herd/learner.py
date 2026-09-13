@@ -8,7 +8,16 @@ from pathlib import Path
 
 from .gateway import BudgetExceeded, GatewayError, GlobalBudgetExceeded, input_token_bound
 from .integrations.weave import traced
-from .schemas import AttemptRecord, BehaviorResult, CheckResult, LessonDraft, TaskManifest, digest, utcnow
+from .schemas import (
+    AttemptRecord,
+    BehaviorResult,
+    CheckResult,
+    LessonDraft,
+    Partition,
+    TaskManifest,
+    digest,
+    utcnow,
+)
 
 SYSTEM = """You are a marimo notebook author. Solve the user's public task using the pinned docs.
 Return exactly one JSON object per turn. Supported actions:
@@ -29,6 +38,11 @@ def parse_object(content: str) -> dict:
     if not isinstance(obj, dict):
         raise TypeError("JSON object required")
     return obj
+
+
+def requires_browser(task):
+    """Browser evidence is collected for learning origins and demonstrations, not every trial arm."""
+    return task.partition in (Partition.DEVELOPMENT, Partition.CALIBRATION, Partition.DEMONSTRATION)
 
 
 class Learner:
@@ -63,6 +77,7 @@ class Learner:
         )
         if mode == "measured" and getattr(self.evaluator, "mode", None) != "docker":
             record.status = "infrastructure_error"
+            record.infrastructure_kind = "preflight"
             record.result = BehaviorResult(
                 task_id=task.task_id,
                 success=False,
@@ -78,11 +93,12 @@ class Learner:
             return record
         if mode == "measured":
             try:
-                readiness = await self.evaluator.preflight(browser=True)
+                readiness = await self.evaluator.preflight(browser=requires_browser(task))
             except Exception as exc:  # noqa: BLE001 - readiness failures must prevent all paid calls
                 readiness = {"ready": False, "reason": str(exc)}
             if not readiness.get("ready"):
                 record.status = "infrastructure_error"
+                record.infrastructure_kind = "preflight"
                 record.result = BehaviorResult(
                     task_id=task.task_id,
                     success=False,
@@ -114,6 +130,7 @@ class Learner:
             },
         ]
         record.messages = messages
+        awaiting_provider = False
         try:
             async with asyncio.timeout(task.budget.max_wall_seconds):
                 while (
@@ -124,12 +141,14 @@ class Learner:
                     output_cap = min(task.budget.max_output_tokens_per_turn, remaining)
                     if output_cap <= 0 or input_token_bound(messages) + output_cap > remaining:
                         raise BudgetExceeded("Episode token budget reached")
+                    awaiting_provider = True
                     turn = await self.gateway.complete(
                         messages,
                         max_output_tokens=output_cap,
                         request_id=f"{run_id}:turn:{record.tool_calls}",
                         max_input_tokens=remaining - output_cap,
                     )
+                    awaiting_provider = False
                     record.input_tokens += turn.input_tokens
                     record.output_tokens += turn.output_tokens
                     record.cost_usd += turn.cost_usd
@@ -163,9 +182,11 @@ class Learner:
                     result = await self.repair_task(task, source, work / f"submission-{record.submissions}")
                     record.result = result
                     if record.submissions == 1:
+                        record.initial_result = result
                         record.first_submission_success = result.success
                     if result.infrastructure_error:
                         record.status = "infrastructure_error"
+                        record.infrastructure_kind = "runtime"
                         break
                     # Hidden inputs, expected values and private paths never enter the worker conversation.
                     feedback = {
@@ -183,9 +204,14 @@ class Learner:
         except BudgetExceeded:
             record.status = "budget_exhausted"
         except TimeoutError:
-            record.status = "budget_exhausted"
+            # The episode deadline can cancel an in-flight billed HTTP request. Its ledger reservation
+            # remains unresolved; do not turn this into a worker loss or automatically buy another run.
+            record.status = "infrastructure_error" if awaiting_provider else "budget_exhausted"
+            if awaiting_provider:
+                record.infrastructure_kind = "provider"
         except GatewayError:
             record.status = "infrastructure_error"
+            record.infrastructure_kind = "provider"
         if record.status == "budget_exhausted" and record.result is None:
             record.result = BehaviorResult(
                 task_id=task.task_id,
@@ -206,7 +232,7 @@ class Learner:
 
     @traced("repair_task")
     async def repair_task(self, task, source, workspace):
-        return await self.evaluator.evaluate(task, source, workspace, browser=True)
+        return await self.evaluator.evaluate(task, source, workspace, browser=requires_browser(task))
 
     @traced("distill_lesson")
     async def distill(self, attempt: AttemptRecord, task: TaskManifest) -> LessonDraft | None:

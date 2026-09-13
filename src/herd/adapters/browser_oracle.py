@@ -69,6 +69,14 @@ async def _cleanup(process, commands):
             continue
 
 
+def classify_browser_error(error: Exception) -> CheckResult:
+    """Ambiguous task elements are candidate defects; engine/connection faults are infrastructure."""
+    detail = str(error)[:1000]
+    if "strict mode violation" in str(error).lower():
+        return CheckResult(name="browser_behavior", passed=False, detail=detail)
+    raise OSError("Browser infrastructure failed: " + detail) from error
+
+
 class BrowserOracle:
     def __init__(self, runtime):
         self.runtime = runtime
@@ -229,10 +237,10 @@ while True:
                         page = await context.new_page()
                         await page.goto(origin)
                         result = page.locator("#herd-result")
-                        initial = self.runtime.registry.expected(task, task.public_fixture["records"], 1)
+                        initial = self.runtime.registry.expected_result(task)
                         await expect(result).to_have_text(json.dumps(initial, sort_keys=True), timeout=20000)
                         checks.append(CheckResult(name="browser_initial", passed=True))
-                        slider = page.get_by_role("slider")
+                        slider = page.get_by_role("slider").first
                         await slider.focus()
                         await slider.press("ArrowRight")
                         if task.track == 3:
@@ -241,9 +249,44 @@ while True:
                             await expect(result).to_have_text(json.dumps(initial, sort_keys=True))
                             checks.append(CheckResult(name="form_waits_for_submit", passed=True))
                             await page.get_by_role("button", name="Apply", exact=True).click()
-                        expected = self.runtime.registry.expected(task, task.public_fixture["records"], 2)
+                        kind = task.public_fixture["interaction_contract"]
+                        probe = {
+                            "records": task.public_fixture["records"],
+                            "value": 2,
+                            "selection": [0],
+                            "include_negative": True,
+                            "offset": 0,
+                            "enabled": True,
+                        }
+                        expected = self.runtime.registry.expected_result(task, probe)
                         await expect(result).to_have_text(json.dumps(expected, sort_keys=True), timeout=10000)
                         checks.append(CheckResult(name="browser_interaction", passed=True))
+                        if kind == "table":
+                            # Header select-all plus one checkbox per fixture row.
+                            await page.get_by_role("checkbox").nth(2).click()
+                            probe["selection"] = [0, 1]
+                        elif kind == "multi_offset":
+                            await page.get_by_role("slider").nth(1).focus()
+                            await page.get_by_role("slider").nth(1).press("ArrowRight")
+                            probe["offset"] = 1
+                        elif kind == "multi_checkbox":
+                            await slider.focus()
+                            await slider.press("Home")
+                            probe["value"] = -5
+                            await page.get_by_role("checkbox", name="Include negatives").click()
+                            probe["include_negative"] = False
+                        elif kind == "stop":
+                            await page.get_by_role("checkbox", name="Enabled").click()
+                            await expect(result).to_have_count(0, timeout=10000)
+                            await expect(page.get_by_text("Paused", exact=True)).to_be_visible()
+                            checks.append(CheckResult(name="browser_stops_downstream", passed=True))
+                            await page.get_by_role("checkbox", name="Enabled").click()
+                        if kind in ("table", "multi_offset", "multi_checkbox", "stop"):
+                            expected = self.runtime.registry.expected_result(task, probe)
+                            await expect(result).to_have_text(
+                                json.dumps(expected, sort_keys=True), timeout=10000
+                            )
+                            checks.append(CheckResult(name="browser_secondary_dependency", passed=True))
                         screenshot = notebook.parent.parent / f"{name}.png"
                         await page.screenshot(path=str(screenshot), full_page=True)
                         checks[-1].evidence = {"screenshot": str(screenshot), "server_log": str(log_file)}
@@ -252,7 +295,7 @@ while True:
         except (AssertionError, PlaywrightTimeoutError) as exc:
             checks.append(CheckResult(name="browser_behavior", passed=False, detail=str(exc)[:1000]))
         except PlaywrightError as exc:
-            raise OSError("Browser infrastructure failed: " + str(exc)[:1000]) from exc
+            checks.append(classify_browser_error(exc))
         finally:
             commands = (
                 [

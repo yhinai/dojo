@@ -37,6 +37,11 @@ def update_gate(state: GateState, pair: PairOutcome) -> GateState:
     elif len(state.pair_ids) >= state.max_pairs:
         state.decision = "insufficient_evidence"
         state.reason = "Finite pair budget exhausted without admission"
+    elif state.log_e + (state.max_pairs - len(state.pair_ids)) * math.log1p(state.bet) < math.log(
+        1 / state.alpha
+    ):
+        state.decision = "insufficient_evidence"
+        state.reason = "Admission threshold unreachable within remaining pair budget"
     return state
 
 

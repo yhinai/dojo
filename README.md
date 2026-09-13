@@ -18,7 +18,7 @@ cp .env.example .env
 uv run herd preflight
 ```
 
-Configure `WANDB_API_KEY`, `WANDB_PROJECT=entity/project`, and a random `HERD_CONTROL_TOKEN` in `.env`. The default worker is W&B Inference `deepseek-ai/DeepSeek-V4-Flash-0731`; the initial global inference cap is **$10**. The full protocol can pause before completion when this cap is exhausted. No credentials are committed or mounted into notebook containers. Different providers/models require explicit verified prices.
+Configure `WANDB_API_KEY`, `WANDB_PROJECT=entity/project`, and a random `HERD_CONTROL_TOKEN` in `.env`. The default worker is W&B Inference `deepseek-ai/DeepSeek-V4-Flash-0731`; the initial global inference cap is **$25**. The full protocol can pause before completion when this cap is exhausted. No credentials are committed or mounted into notebook containers. Different providers/models require explicit verified prices.
 
 `herd preflight` performs local Docker, sandbox and Chromium readiness checks without paid inference. Measured workers check readiness before calling the provider. Generated notebook success requires headless behavior checks plus fresh browser startup and the registered interaction.
 
@@ -110,3 +110,13 @@ The service and `herd run` continuously sweep durable records into the Weave out
 For TypeSafe or another provider, supply its documented HTTPS OpenAI-compatible endpoint, model ID and verified token prices, set `HERD_PROVIDER_NAME`, and run `herd provider-check`. No proprietary endpoint is guessed. A provider with a different wire protocol needs a documented adapter before it can be claimed as supported. Changing providers starts a separately bound experiment.
 
 [Deployment instructions](deploy/README.md) include Linux services, authenticated Caddy proxy, secret files, backup/restore, health monitoring and a molab control-room package. Build that package with `uv run python scripts/package_molab.py /new/output/directory`. Public hosting, actual sponsor account validation, live experiment results and recordings still require execution and access.
+
+## Calibrate and inspect readiness
+
+Run `herd calibrate EXPERIMENT_ID` before training. Its assessment reports actual first-submission success, an explicit >85% success warning, and measured episode cost/latency projected over the complete workload. A 30–50% first-attempt failure rate is a task-design target, never a manufactured result. Auxiliary distillation/curation costs are separately identified estimates until those calls execute. The $25 default is a spending ceiling; use measured calibration to choose an appropriate allowance.
+
+`/api/health` reports liveness. `/api/readiness` reports database health, worker/provider configuration, Docker-image availability and actual cached Chromium-launch readiness separately; unavailable dependencies return HTTP 503. Authenticated `/api/experiments/ID/attempts?offset=0&limit=100` and `/events?after=0&limit=100` provide bounded pages; `/attempts/RUN_ID` loads full code/conversation evidence only when requested. The dashboard uses these endpoints and a manual full-report load control.
+
+The opening demo beat has a source: `/api/experiments/ID/failure-clusters` groups actual round-one first-submission failing checks across learners. `scripts/assemble_demo.py` exports the same data as `round-one-failure-clusters.json` with run IDs. A missing first submission remains missing evidence.
+
+Live Weave operations initialize for either `HERD_WEAVE_PROJECT` or `WANDB_PROJECT`; actual paired results also enter `EvaluationLogger` during execution. The outbox's separately labeled replay supports recovery. Set `HERD_TRACE_CONVERSATIONS=1` to include redacted worker conversations; the default omits conversation content. Never include credentials in worker prompts.

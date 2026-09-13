@@ -376,3 +376,225 @@ def test_curated_baseline_is_distinct_and_frozen(tmp_path):
     from herd.schemas import digest
 
     assert exp["config"]["curated_docs_hash"] == digest(exp["config"]["curated_docs"])
+
+
+class RuntimeRetryWorker:
+    def __init__(self, failures=1, provider=False):
+        self.calls = []
+        self.failures = failures
+        self.provider = provider
+
+    async def attempt(self, task, run_id, identity, round_id, pool_hash, memory, arm):
+        self.calls.append((run_id, identity, arm))
+        failed = self.failures > 0 and arm != "treatment"
+        if failed:
+            self.failures -= 1
+        return AttemptRecord(
+            run_id=run_id,
+            task_id=task.task_id,
+            learner_id=identity,
+            round_id=round_id,
+            pool_hash=pool_hash,
+            arm=arm,
+            mode="test",
+            status="infrastructure_error" if failed else "completed",
+            infrastructure_kind=("provider" if self.provider else "runtime") if failed else None,
+            result=BehaviorResult(
+                task_id=task.task_id,
+                success=not failed,
+                mode="test",
+                infrastructure_error="transient runtime" if failed else None,
+                checks=[CheckResult(name="integrity", passed=not failed)],
+            ),
+        )
+
+
+@pytest.mark.asyncio
+async def test_pair_retry_reexecutes_both_arms_once_and_resume_reuses_evidence(tmp_path):
+    store = Store(tmp_path / "retry.db")
+    worker = RuntimeRetryWorker()
+    engine = Engine(store, Registry(), worker, tmp_path, "fixture")
+    engine.create("e")
+    task = engine.task("e", Partition.ADMISSION, 3)
+    pool = engine.pool("e")
+    pair = await engine.evaluate_pair("e", task, "pair", 1, pool, None)
+    assert all(x.result.success for x in pair)
+    assert len(worker.calls) == 4
+    assert len({x[0] for x in worker.calls}) == 4
+    assert {x[1] for x in worker.calls} == {"pair", "pair:pair-runtime-retry"}
+    assert len(store.list("e", "pair_retry")) == 1
+    repeated = await engine.evaluate_pair("e", task, "pair", 1, pool, None)
+    assert [x.run_id for x in repeated] == [x.run_id for x in pair]
+    assert len(worker.calls) == 4
+
+
+@pytest.mark.asyncio
+async def test_runtime_attempt_retry_preserves_first_record(tmp_path):
+    store = Store(tmp_path / "retry.db")
+    worker = RuntimeRetryWorker()
+    engine = Engine(store, Registry(), worker, tmp_path, "fixture")
+    engine.create("e")
+    task = engine.task("e", Partition.DEVELOPMENT, 3)
+    resolved = await engine.attempt("e", task, "learner", 1, engine.pool("e"))
+    assert resolved.result.success and resolved.retry_of
+    assert store.get("e", "attempt", resolved.retry_of)["status"] == "infrastructure_error"
+    await engine.attempt("e", task, "learner", 1, engine.pool("e"))
+    assert len(worker.calls) == 2
+
+
+@pytest.mark.asyncio
+async def test_provider_error_never_gets_fresh_billed_retry(tmp_path):
+    from herd.gateway import GatewayError
+
+    worker = RuntimeRetryWorker(provider=True)
+    engine = Engine(Store(tmp_path / "retry.db"), Registry(), worker, tmp_path, "fixture")
+    engine.create("e")
+    with pytest.raises(GatewayError, match="no automatic billed retry"):
+        await engine.attempt("e", engine.task("e", Partition.DEVELOPMENT, 0), "learner", 1, engine.pool("e"))
+    assert len(worker.calls) == 1
+    assert not engine.store.list("e", "runtime_retry")
+
+
+@pytest.mark.asyncio
+async def test_regression_infrastructure_does_not_reject_lesson(tmp_path):
+    from herd.engine import PairedInfrastructureError
+
+    worker = RuntimeRetryWorker(failures=2)
+    engine = Engine(Store(tmp_path / "retry.db"), Registry(), worker, tmp_path, "fixture")
+    engine.create("e")
+    with pytest.raises(PairedInfrastructureError):
+        await engine.controls("e", 1, engine.pool("e"))
+    assert len(worker.calls) == 4
+    assert len(engine.store.list("e", "pair_retry")) == 2
+    assert not engine.store.list("e", "lesson")
+    # An explicit subsequent invocation may recover the control, without rewriting failed attempts.
+    assert await engine.controls("e", 1, engine.pool("e"))
+    assert len(engine.store.list("e", "attempt")) == 14
+
+
+@pytest.mark.asyncio
+async def test_invalid_pair_is_consumed_once_and_resume_draws_new_task(tmp_path):
+    from herd.engine import PairedInfrastructureError
+    from herd.schemas import LessonRevision
+
+    worker = RuntimeRetryWorker(failures=2)
+    engine = Engine(Store(tmp_path / "gate-retry.db"), Registry(), worker, tmp_path, "fixture")
+    engine.create("e")
+
+    async def passing_controls(*args, **kwargs):
+        return True
+
+    engine.controls = passing_controls
+    candidate = LessonRevision(
+        lesson_id="lesson",
+        runtime_lock_hash="r",
+        scope_tags=["cells"],
+        trigger="When defining cells",
+        instruction="Define each public name once.",
+        does_not_apply="Not across independent files.",
+        origin_learner_id="learner",
+        origin_round=1,
+        origin_task_ids=["dev"],
+        repair_run_ids=["repair"],
+    )
+    with pytest.raises(PairedInfrastructureError):
+        await engine.gate("e", 1, engine.pool("e"), candidate, 0)
+    state = engine.store.list("e", "gate")[0]
+    assert state["invalid"] == 1 and len(state["pair_ids"]) == 1
+    assert state["log_e"] == 0 and state["decision"] == "evaluating"
+    invalid_pair = engine.store.list("e", "pair")[0]
+    assert not invalid_pair["valid"]
+    first_ids = {x[0] for x in worker.calls}
+    await engine.gate("e", 1, engine.pool("e"), candidate, 0)
+    state = engine.store.list("e", "gate")[0]
+    assert state["invalid"] == 1
+    assert len(state["task_ids"]) == len(set(state["task_ids"]))
+    assert len([x for x in worker.calls if x[0] in first_ids]) == 4
+
+
+@pytest.mark.asyncio
+async def test_sibling_duplicates_and_conflicts_quarantine_at_commit(tmp_path):
+    from herd.schemas import LessonRevision, LessonStatus
+
+    engine = Engine(Store(tmp_path / "composition.db"), Registry(), None, tmp_path, "fixture")
+    engine.create("e")
+
+    async def develop(eid, round_id, pool, index):
+        if round_id != 1 or index > 2:
+            return None
+        return LessonRevision(
+            lesson_id=f"lesson-{index}",
+            runtime_lock_hash="r",
+            scope_tags=["cells"],
+            trigger="When defining cells",
+            instruction="Define each public name once." if index < 2 else "Other advice.",
+            does_not_apply="Not across independent files.",
+            origin_learner_id=f"learner-{index}",
+            origin_round=1,
+            origin_task_ids=[f"dev-{index}"],
+            repair_run_ids=[f"repair-{index}"],
+            conflicts_with=["lesson-0"] if index == 2 else [],
+        )
+
+    # Individually admitted siblings must still pass deterministic composition checks.
+    async def gate(eid, round_id, pool, candidate, slot):
+        candidate.status = LessonStatus.ADMITTED
+        candidate.trial_id = f"trial-{slot}"
+        return candidate
+
+    async def controls(*args, **kwargs):
+        return True
+
+    async def nothing(*args):
+        return None
+
+    engine.develop, engine.gate, engine.controls = develop, gate, controls
+    engine.final = engine.run_false_controls = nothing
+    await engine.run("e")
+    assert [x.lesson_id for x in engine.pool("e").lessons] == ["lesson-0"]
+    assert engine.store.get("e", "lesson", "lesson-2")["status"] == "quarantined"
+    duplicate = engine.store.get("e", "lesson", "lesson-1")
+    assert duplicate["status"] == "quarantined" and "duplicate" in duplicate["decision_reason"]
+    assert any(x["event_type"] == "lesson.composition_quarantined" for x in engine.store.events("e"))
+
+
+@pytest.mark.asyncio
+async def test_exhausted_runtime_retry_requires_new_execution_epoch(tmp_path):
+    from herd.gateway import GatewayError
+
+    worker = RuntimeRetryWorker(failures=2)
+    engine = Engine(Store(tmp_path / "retry.db"), Registry(), worker, tmp_path, "fixture")
+    engine.create("e")
+    task = engine.task("e", Partition.DEVELOPMENT, 0)
+    pool = engine.pool("e")
+    for _ in range(2):
+        with pytest.raises(GatewayError, match="failed twice"):
+            await engine.attempt("e", task, "learner", 1, pool)
+    assert len(worker.calls) == 2
+    experiment = engine.store.get("e", "experiment", "e")
+    experiment["execution_epoch"] = 1
+    engine.store.put("e", "experiment", "e", experiment)
+    recovered = await engine.attempt("e", task, "learner", 1, pool)
+    assert recovered.result.success
+    assert len(worker.calls) == 3 and len({x[0] for x in worker.calls}) == 3
+    assert len(engine.store.list("e", "attempt")) == 3
+
+
+@pytest.mark.asyncio
+async def test_cached_pair_does_not_emit_new_live_evaluation(tmp_path, monkeypatch):
+    calls = []
+
+    async def log(name, attempts, metadata):
+        calls.append([a.run_id for a in attempts])
+        return {"status": "logged", "mode": "actual_worker_execution"}
+
+    monkeypatch.setattr("herd.integrations.weave.log_execution_pair", log)
+    engine = Engine(
+        Store(tmp_path / "live.db"), Registry(), RuntimeRetryWorker(failures=0), tmp_path, "fixture"
+    )
+    engine.create("e")
+    task = engine.task("e", Partition.ADMISSION, 3)
+    for _ in range(2):
+        await engine.evaluate_pair("e", task, "pair", 1, engine.pool("e"), None)
+    assert len(calls) == 1
+    assert len(engine.store.list("e", "live_evaluation")) == 1

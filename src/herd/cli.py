@@ -17,17 +17,18 @@ app = typer.Typer(help="HERD — One agent struggles. Every agent learns.")
 @app.callback()
 def maintenance_guard(ctx: typer.Context):
     """Hold a shared service lease; offline backups take an exclusive lease."""
-    if ctx.invoked_subcommand in {'backup', 'restore'}:
+    if ctx.invoked_subcommand in {"backup", "restore"}:
         return
     import fcntl
+
     directory = state_dir()
     directory.mkdir(parents=True, exist_ok=True)
-    lock = (directory / 'maintenance.lock').open('a')
+    lock = (directory / "maintenance.lock").open("a")
     try:
         fcntl.flock(lock, fcntl.LOCK_SH | fcntl.LOCK_NB)
     except BlockingIOError:
         lock.close()
-        raise typer.BadParameter('State maintenance is active; retry after backup completes') from None
+        raise typer.BadParameter("State maintenance is active; retry after backup completes") from None
     ctx.call_on_close(lock.close)
 
 
@@ -40,15 +41,16 @@ async def sync_all_evidence():
     import fcntl
 
     from herd.integrations.weave import WeaveIntegration
-    store = Store(state_dir() / 'herd.sqlite3')
-    integration = WeaveIntegration(os.getenv('HERD_WEAVE_PROJECT') or os.getenv('WANDB_PROJECT'), state_dir())
-    with (state_dir() / 'evidence.lock').open('a') as lock:
+
+    store = Store(state_dir() / "herd.sqlite3")
+    integration = WeaveIntegration(os.getenv("HERD_WEAVE_PROJECT") or os.getenv("WANDB_PROJECT"), state_dir())
+    with (state_dir() / "evidence.lock").open("a") as lock:
         try:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             return
         for experiment in store.experiments():
-            await integration.sync_store(store, experiment['id'])
+            await integration.sync_store(store, experiment["id"])
 
 
 def evidence_daemon(stop):
@@ -58,12 +60,14 @@ def evidence_daemon(stop):
         except Exception as exc:  # noqa: BLE001 - optional integration cannot halt local learning
             # Source records and upload errors persist; retry without stopping learning.
             import logging
-            logging.getLogger(__name__).warning('Evidence synchronization pending: %s', type(exc).__name__)
+
+            logging.getLogger(__name__).warning("Evidence synchronization pending: %s", type(exc).__name__)
         stop.wait(15)
 
 
 async def run_with_evidence(engine, experiment_id):
     import threading
+
     stop = threading.Event()
     worker = threading.Thread(target=evidence_daemon, args=(stop,), daemon=True)
     worker.start()
@@ -72,7 +76,12 @@ async def run_with_evidence(engine, experiment_id):
     finally:
         stop.set()
         await asyncio.to_thread(worker.join, 5)
-        await sync_all_evidence()
+        try:
+            await sync_all_evidence()
+        except Exception as exc:  # noqa: BLE001 - optional telemetry must not fail completed local work
+            import logging
+
+            logging.getLogger(__name__).warning("Evidence synchronization pending: %s", type(exc).__name__)
 
 
 def make_engine():
@@ -104,19 +113,34 @@ def make_engine():
     learner = Learner(
         gateway, runtime, state_dir() / "workspaces", docs=(ROOT / "docs/snapshots/marimo.md").read_text()
     )
-    max_workers = int(os.getenv('HERD_MAX_WORKERS', '4'))
+    max_workers = int(os.getenv("HERD_MAX_WORKERS", "4"))
     if not 1 <= max_workers <= 10:
-        raise ValueError('HERD_MAX_WORKERS must be between 1 and 10')
-    engine = Engine(Store(state_dir() / "herd.sqlite3"), registry, learner, state_dir(), provider.config_hash,
-                    concurrency=max_workers)
-    engine.config.update(
-        runtime_hash=config["runtime_hash"], runtime_image_id=image_id, provider=provider.public_dict(),
-        max_workers=max_workers
+        raise ValueError("HERD_MAX_WORKERS must be between 1 and 10")
+    engine = Engine(
+        Store(state_dir() / "herd.sqlite3"),
+        registry,
+        learner,
+        state_dir(),
+        provider.config_hash,
+        concurrency=max_workers,
     )
-    if os.getenv("WANDB_API_KEY") and os.getenv("WANDB_PROJECT"):
+    engine.config.update(
+        runtime_hash=config["runtime_hash"],
+        runtime_image_id=image_id,
+        provider=provider.public_dict(),
+        max_workers=max_workers,
+    )
+    if os.getenv("WANDB_API_KEY") and (os.getenv("HERD_WEAVE_PROJECT") or os.getenv("WANDB_PROJECT")):
         from herd.integrations.weave import WeaveIntegration
 
-        WeaveIntegration(os.getenv("WANDB_PROJECT"), state_dir()).connect()
+        try:
+            WeaveIntegration(
+                os.getenv("HERD_WEAVE_PROJECT") or os.getenv("WANDB_PROJECT"), state_dir()
+            ).connect()
+        except Exception as exc:  # noqa: BLE001 - durable outbox can recover optional sponsor initialization
+            import logging
+
+            logging.getLogger(__name__).warning("Live tracing unavailable: %s", type(exc).__name__)
     return engine
 
 
@@ -127,8 +151,11 @@ def preflight():
     cfg = configuration()
     from herd.adapters.runtime import RuntimeEvaluator
     from herd.task_registry import TaskRegistry
-    runtime = RuntimeEvaluator(TaskRegistry(cfg["runtime_hash"], cfg["docs_hash"]),
-                               image=os.getenv("HERD_RUNTIME_IMAGE", "herd-runtime:local"))
+
+    runtime = RuntimeEvaluator(
+        TaskRegistry(cfg["runtime_hash"], cfg["docs_hash"]),
+        image=os.getenv("HERD_RUNTIME_IMAGE", "herd-runtime:local"),
+    )
     readiness = asyncio.run(runtime.preflight(browser=True))
     checks = {
         "runtime_hash": cfg["runtime_hash"],
@@ -140,7 +167,7 @@ def preflight():
         "provider_key_configured": bool(os.getenv("WANDB_API_KEY") or os.getenv("HERD_INFERENCE_API_KEY")),
         "weave_project_configured": bool(os.getenv("WANDB_PROJECT") or os.getenv("HERD_WEAVE_PROJECT")),
         "protocol": cfg["protocol"]["schema_version"],
-        "max_workers": int(os.getenv('HERD_MAX_WORKERS', '4')),
+        "max_workers": int(os.getenv("HERD_MAX_WORKERS", "4")),
         "sponsor_capabilities": provider_capabilities(),
     }
     typer.echo(json.dumps(checks, indent=2))
@@ -149,17 +176,24 @@ def preflight():
 @app.command()
 def health():
     """Verify durable store and event-chain health without model calls."""
-    store = Store(state_dir() / 'herd.sqlite3')
-    typer.echo(json.dumps({**store.health(), 'event_chains': {
-        e['id']: store.verify_events(e['id']) for e in store.experiments()}}, indent=2))
+    store = Store(state_dir() / "herd.sqlite3")
+    typer.echo(
+        json.dumps(
+            {
+                **store.health(),
+                "event_chains": {e["id"]: store.verify_events(e["id"]) for e in store.experiments()},
+            },
+            indent=2,
+        )
+    )
 
 
 @app.command()
 def control(experiment_id: str, action: str):
     """Request pause, cancel, or resume at a durable worker checkpoint."""
-    if action not in {'pause', 'cancel', 'resume'}:
-        raise typer.BadParameter('Action must be pause, cancel, or resume')
-    store = Store(state_dir() / 'herd.sqlite3')
+    if action not in {"pause", "cancel", "resume"}:
+        raise typer.BadParameter("Action must be pause, cancel, or resume")
+    store = Store(state_dir() / "herd.sqlite3")
     typer.echo(json.dumps(store.request_control(experiment_id, action), indent=2))
 
 
@@ -168,9 +202,10 @@ def accounting(experiment_id: str, output: Path | None = None):
     """Export all-stage cost, unresolved reservations and elapsed time."""
     from herd.gateway import BudgetLedger, GatewayConfig
     from herd.reports import experiment_accounting
+
     load_environment()
-    store = Store(state_dir() / 'herd.sqlite3')
-    ledger = BudgetLedger(state_dir() / 'budget.sqlite3', GatewayConfig.from_env().cap_usd)
+    store = Store(state_dir() / "herd.sqlite3")
+    ledger = BudgetLedger(state_dir() / "budget.sqlite3", GatewayConfig.from_env().cap_usd)
     report = experiment_accounting(store, experiment_id, ledger)
     encoded = json.dumps(report, indent=2)
     if output:
@@ -179,11 +214,14 @@ def accounting(experiment_id: str, output: Path | None = None):
 
 
 @app.command()
-def reconcile(request_id: str, actual_usd: float, evidence: str, operator: str, authorize_retry: bool = False):
+def reconcile(
+    request_id: str, actual_usd: float, evidence: str, operator: str, authorize_retry: bool = False
+):
     """Settle a provider receipt and optionally authorize a new billed retry generation."""
     from herd.gateway import BudgetLedger, GatewayConfig
+
     load_environment()
-    ledger = BudgetLedger(state_dir() / 'budget.sqlite3', GatewayConfig.from_env().cap_usd)
+    ledger = BudgetLedger(state_dir() / "budget.sqlite3", GatewayConfig.from_env().cap_usd)
     ledger.reconcile(request_id, actual_usd, evidence, operator, authorize_retry=authorize_retry)
     typer.echo(json.dumps(ledger.summary(), indent=2))
 
@@ -192,6 +230,7 @@ def reconcile(request_id: str, actual_usd: float, evidence: str, operator: str, 
 def backup(destination: Path):
     """Snapshot stopped/paused state and workspaces into a new directory."""
     from herd.backup import backup_state
+
     typer.echo(json.dumps(backup_state(state_dir(), destination), indent=2))
 
 
@@ -199,6 +238,7 @@ def backup(destination: Path):
 def restore(source: Path, destination: Path):
     """Verify and restore an offline backup into a new state directory."""
     from herd.backup import restore_state
+
     typer.echo(json.dumps(restore_state(source, destination), indent=2))
 
 
@@ -208,25 +248,53 @@ def provider_check():
     from uuid import uuid4
 
     from herd.gateway import BudgetLedger, GatewayConfig, ProviderGateway
+
     load_environment()
     config = GatewayConfig.from_env()
-    gateway = ProviderGateway(config, BudgetLedger(state_dir() / 'budget.sqlite3', config.cap_usd))
-    result = asyncio.run(gateway.complete([{'role': 'user', 'content': 'Reply with the single word READY.'}],
-                                         32, 'provider-check-' + uuid4().hex))
-    typer.echo(json.dumps({'status': 'verified', 'model': config.model,
-                          'input_tokens': result.input_tokens, 'output_tokens': result.output_tokens,
-                          'cost_usd': result.cost_usd}, indent=2))
+    gateway = ProviderGateway(config, BudgetLedger(state_dir() / "budget.sqlite3", config.cap_usd))
+    result = asyncio.run(
+        gateway.complete(
+            [{"role": "user", "content": "Reply with the single word READY."}],
+            32,
+            "provider-check-" + uuid4().hex,
+        )
+    )
+    typer.echo(
+        json.dumps(
+            {
+                "status": "verified",
+                "model": config.model,
+                "input_tokens": result.input_tokens,
+                "output_tokens": result.output_tokens,
+                "cost_usd": result.cost_usd,
+            },
+            indent=2,
+        )
+    )
 
 
 @app.command()
-def lifecycle(experiment_id: str, action: str, reason: str, lesson_ids: str = '',
-              target_pool_hash: str = '', replacement_id: str = ''):
+def lifecycle(
+    experiment_id: str,
+    action: str,
+    reason: str,
+    lesson_ids: str = "",
+    target_pool_hash: str = "",
+    replacement_id: str = "",
+):
     """Queue a reviewed retraction, rollback or supersession for a measured boundary check."""
     from herd.lifecycle import request_change
-    store = Store(state_dir() / 'herd.sqlite3')
-    result = request_change(store, experiment_id, action, reason,
-                            lesson_ids=[value for value in lesson_ids.split(',') if value] or None,
-                            target_pool_hash=target_pool_hash or None, replacement_id=replacement_id or None)
+
+    store = Store(state_dir() / "herd.sqlite3")
+    result = request_change(
+        store,
+        experiment_id,
+        action,
+        reason,
+        lesson_ids=[value for value in lesson_ids.split(",") if value] or None,
+        target_pool_hash=target_pool_hash or None,
+        replacement_id=replacement_id or None,
+    )
     typer.echo(json.dumps(result, indent=2))
 
 
@@ -236,33 +304,65 @@ def false_controls(experiment_id: str):
     engine = make_engine()
     with engine.store.execution_lock():
         asyncio.run(engine.run_false_controls(experiment_id))
-    typer.echo(json.dumps(engine.store.list(experiment_id, 'poisoning_control'), indent=2))
+    typer.echo(json.dumps(engine.store.list(experiment_id, "poisoning_control"), indent=2))
 
 
 @app.command()
 def calibrate(experiment_id: str, seed: int = 20260913, tasks: int = 12):
     """Measure the worker on calibration tasks, excluded from lessons and final estimates."""
     from herd.schemas import Partition
+
     if not 1 <= tasks <= 60:
-        raise typer.BadParameter('Calibration task count must be between 1 and 60')
+        raise typer.BadParameter("Calibration task count must be between 1 and 60")
     engine = make_engine()
-    if engine.store.get(experiment_id, 'experiment', experiment_id) is None:
-        raise typer.BadParameter('Unknown experiment')
+    if engine.store.get(experiment_id, "experiment", experiment_id) is None:
+        raise typer.BadParameter("Unknown experiment")
 
     async def measure():
         results = []
+        measured_attempts = []
         with engine.store.execution_lock():
             for index in range(tasks):
                 task = engine.task(experiment_id, Partition.CALIBRATION, seed + index)
-                result = await engine.attempt(experiment_id, task, f'calibration-{index}', 0,
-                                              engine.pool(experiment_id), arm='calibration', memory='')
-                results.append({'run_id': result.run_id, 'task_id': task.task_id,
-                                'success': result.result.success if result.result else None,
-                                'first_submission_success': result.first_submission_success,
-                                'submissions': result.submissions, 'status': result.status})
-        record = {'seed': seed, 'results': results, 'mode': 'measured',
-                  'note': 'Calibration is excluded from lesson creation and final estimates.'}
-        engine.store.put(experiment_id, 'calibration', str(seed), record)
+                result = await engine.attempt(
+                    experiment_id,
+                    task,
+                    f"calibration-{index}",
+                    0,
+                    engine.pool(experiment_id),
+                    arm="calibration",
+                    memory="",
+                )
+                measured_attempts.append(result)
+                results.append(
+                    {
+                        "run_id": result.run_id,
+                        "task_id": task.task_id,
+                        "success": result.result.success if result.result else None,
+                        "first_submission_success": result.first_submission_success,
+                        "submissions": result.submissions,
+                        "status": result.status,
+                    }
+                )
+        from herd.reports import calibration_report
+
+        logical_ids = {a.logical_run_id or a.run_id for a in measured_attempts}
+        physical_attempts = [
+            a
+            for a in engine.store.list(experiment_id, "attempt")
+            if a["run_id"] in logical_ids or a.get("logical_run_id") in logical_ids
+        ]
+        assessment = calibration_report(
+            physical_attempts, engine.config.get("max_workers", 4), float(os.getenv("HERD_DOLLAR_CAP", "25"))
+        )
+        record = {
+            "assessment": assessment,
+            "seed": seed,
+            "results": results,
+            "mode": "measured",
+            "note": "Calibration is excluded from lesson creation and final estimates.",
+        }
+        engine.store.put(experiment_id, "calibration", str(seed), record)
         return record
 
     typer.echo(json.dumps(asyncio.run(measure()), indent=2))
@@ -297,11 +397,14 @@ def serve(port: int = 8000, demo: bool = False):
         except (ValueError, RuntimeError):
             pass
     import threading
+
     stop = threading.Event()
     worker = threading.Thread(target=evidence_daemon, args=(stop,), daemon=True)
     worker.start()
     try:
-        uvicorn.run(create_app(Store(state_dir() / "herd.sqlite3"), engine, demo), host="127.0.0.1", port=port)
+        uvicorn.run(
+            create_app(Store(state_dir() / "herd.sqlite3"), engine, demo), host="127.0.0.1", port=port
+        )
     finally:
         stop.set()
         worker.join(timeout=5)
@@ -350,6 +453,7 @@ def validate_fixtures(browser: bool = False):
 def sync_weave(experiment_id: str):
     """Recover and upload genuine local evidence, native evaluations and links."""
     from herd.integrations.weave import WeaveIntegration
+
     load_environment()
     store = Store(state_dir() / "herd.sqlite3")
     if not store.get(experiment_id, "experiment", experiment_id):
@@ -373,8 +477,14 @@ def aria_export(experiment_id: str):
 
 
 @app.command()
-def aria_import(bundle: Path, report: Path, source_url: str, operator: str, curriculum_action: str,
-                track_weights: str = ""):
+def aria_import(
+    bundle: Path,
+    report: Path,
+    source_url: str,
+    operator: str,
+    curriculum_action: str,
+    track_weights: str = "",
+):
     """Attach an operator-attested real ARIA report, URL, and curriculum decision."""
     from herd.integrations.aria import import_analysis
 
@@ -384,8 +494,14 @@ def aria_import(bundle: Path, report: Path, source_url: str, operator: str, curr
     store.event(record["experiment_id"], "aria_analysis_attached", record)
     if track_weights:
         from herd.curriculum import queue_curriculum
-        queue_curriculum(store, record["experiment_id"], record["report_hash"],
-                         json.loads(track_weights), curriculum_action)
+
+        queue_curriculum(
+            store,
+            record["experiment_id"],
+            record["report_hash"],
+            json.loads(track_weights),
+            curriculum_action,
+        )
     typer.echo("ARIA report attached with provenance")
 
 

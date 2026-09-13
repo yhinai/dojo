@@ -109,8 +109,13 @@ class AttemptRecord(Model):
         "infrastructure_error",
         "cancelled",
     ] = "allocated"
+    infrastructure_kind: Literal["runtime", "provider", "preflight"] | None = None
+    logical_run_id: str | None = None
+    logical_learner_id: str | None = None
+    retry_of: str | None = None
     source: str = ""
     initial_source: str = ""
+    initial_result: BehaviorResult | None = None
     result: BehaviorResult | None = None
     first_submission_success: bool = False
     submissions: int = 0

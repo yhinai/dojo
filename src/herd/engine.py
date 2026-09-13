@@ -30,6 +30,12 @@ from herd.schemas import (
 from herd.store import Store
 
 
+class PairedInfrastructureError(GatewayError):
+    def __init__(self, results):
+        self.results = results
+        super().__init__("Paired runtime failed twice; evidence retained and experiment paused")
+
+
 class RunInterrupted(Exception):
     def __init__(self, action):
         self.action = action
@@ -107,8 +113,52 @@ class Engine:
         self.store.put(eid, "task", task.task_id, task)
         return task
 
-    @traced("attempt_task")
+    @staticmethod
+    def runtime_failure(record):
+        return bool(
+            record.status == "infrastructure_error"
+            and record.result
+            and record.result.infrastructure_error
+            and record.infrastructure_kind in (None, "runtime")
+        )
+
     async def attempt(
+        self, eid, task, identity, round_id, pool, arm="admitted_pool", candidate=None, memory=None, key=None
+    ):
+        result = await self._attempt_once(eid, task, identity, round_id, pool, arm, candidate, memory, key)
+        if self.runtime_failure(result) and task.partition not in (Partition.ADMISSION, Partition.REGRESSION):
+            # The retry is a separate session and artifact, permanently bound to the original logical unit.
+            epoch = self.store.get(eid, "experiment", eid, {}).get("execution_epoch", 0)
+            prior = self.store.get(eid, "runtime_retry", result.run_id, {})
+            generation = prior.get("generation", 0)
+            if prior.get("exhausted") and prior.get("execution_epoch") != epoch:
+                generation += 1
+            retry_id = digest([result.run_id, "runtime-retry-v1", generation])[:24]
+            retry_state = {
+                "original_run_id": result.run_id,
+                "retry_run_id": retry_id,
+                "limit": 1,
+                "generation": generation,
+                "execution_epoch": epoch,
+                "exhausted": False,
+            }
+            self.store.put(eid, "runtime_retry", result.run_id, retry_state)
+            retry = await self._attempt_once(
+                eid, task, identity + ":runtime-retry", round_id, pool, arm, candidate, memory, retry_id
+            )
+            retry.logical_run_id = result.run_id
+            retry.logical_learner_id = identity
+            retry.retry_of = result.run_id
+            self.store.put(eid, "attempt", retry.run_id, retry)
+            if self.runtime_failure(retry):
+                retry_state["exhausted"] = True
+                self.store.put(eid, "runtime_retry", result.run_id, retry_state)
+                raise GatewayError("Runtime failed twice; automatic retry exhausted; evidence retained")
+            return retry
+        return result
+
+    @traced("attempt_task")
+    async def _attempt_once(
         self, eid, task, identity, round_id, pool, arm="admitted_pool", candidate=None, memory=None, key=None
     ):
         self.checkpoint(eid)
@@ -131,9 +181,13 @@ class Engine:
             "allocated",
             "running",
             "dollar_cap_reached",
-            "infrastructure_error",
         ):
-            return AttemptRecord.model_validate(existing)
+            cached = AttemptRecord.model_validate(existing)
+            if cached.status == "infrastructure_error" and not self.runtime_failure(cached):
+                # Resume may replay the same request IDs after explicit billing reconciliation.
+                pass
+            else:
+                return cached
         if memory is None:
             memory, ids = retrieve(
                 pool,
@@ -165,29 +219,110 @@ class Engine:
             self.store.put(eid, "attempt", run_id, result)
             if result.status == "dollar_cap_reached":
                 raise GlobalBudgetExceeded("Inference cap reached; raise cap to resume cached requests")
-            if result.status == "infrastructure_error":
-                raise GatewayError("Worker infrastructure unavailable; experiment paused")
+            if result.status == "infrastructure_error" and not self.runtime_failure(result):
+                raise GatewayError("Provider or runtime preflight unavailable; no automatic billed retry")
             return result
 
     @traced("evaluate_pair")
-    async def evaluate_pair(self, eid, task, identity, round_id, pool, candidate):
-        return await safe_gather(
-            self.attempt(eid, task, identity, round_id, pool, "control"),
-            self.attempt(eid, task, identity, round_id, pool, "treatment", candidate),
-        )
+    async def evaluate_pair(self, eid, task, identity, round_id, pool, candidate, treatment_pool=None):
+        pair_key = digest(
+            [
+                task.task_id,
+                identity,
+                round_id,
+                pool.pool_hash,
+                (treatment_pool or pool).pool_hash,
+                candidate.content_hash if candidate else None,
+            ]
+        )[:24]
+        for generation in range(2):
+            session = identity if generation == 0 else identity + ":pair-runtime-retry"
+            invocation_started = utcnow()
+            results = await safe_gather(
+                self.attempt(eid, task, session, round_id, pool, "control"),
+                self.attempt(eid, task, session, round_id, treatment_pool or pool, "treatment", candidate),
+            )
+            if not any(self.runtime_failure(x) for x in results):
+                from herd.integrations.weave import log_execution_pair
+
+                receipt_key = f"{pair_key}-{generation}"
+                fresh = [x for x in results if x.started_at >= invocation_started]
+                if fresh and not self.store.get(eid, "live_evaluation", receipt_key):
+                    receipt = await log_execution_pair(
+                        "paired_worker_execution",
+                        fresh,
+                        {
+                            "pair_key": pair_key,
+                            "generation": generation,
+                            "experiment_id": eid,
+                            "partition": task.partition.value,
+                            "all_pair_run_ids": [x.run_id for x in results],
+                            "cached_run_ids": [x.run_id for x in results if x not in fresh],
+                        },
+                    )
+                    if receipt.get("status") == "logged":
+                        self.store.put(
+                            eid,
+                            "live_evaluation",
+                            receipt_key,
+                            {
+                                **receipt,
+                                "run_ids": [x.run_id for x in fresh],
+                                "pair_key": pair_key,
+                                "generation": generation,
+                            },
+                        )
+                return results
+            self.store.put(
+                eid,
+                "pair_retry",
+                f"{pair_key}-{generation}",
+                {
+                    "pair_key": pair_key,
+                    "generation": generation,
+                    "task_id": task.task_id,
+                    "run_ids": [x.run_id for x in results],
+                    "valid": False,
+                    "reason": "Runtime infrastructure failure",
+                    "counts_as_evidence": False,
+                },
+            )
+        raise PairedInfrastructureError(results)
 
     async def controls(self, eid, round_id, pool, candidate=None, namespace=0, treatment_pool=None):
         """Paired regression sentinel tasks: candidate may not break a control success."""
         for track in range(5):
             task = self.task(eid, Partition.REGRESSION, round_id * 10000 + namespace * 100 + track, track)
-            a, b = await safe_gather(
-                self.attempt(eid, task, "regression", round_id, pool, "control"),
-                self.attempt(
-                    eid, task, "regression", round_id, treatment_pool or pool, "treatment", candidate
-                ),
+            recovery_key = digest(
+                [
+                    round_id,
+                    namespace,
+                    track,
+                    pool.pool_hash,
+                    candidate.content_hash if candidate else None,
+                    treatment_pool.pool_hash if treatment_pool else None,
+                ]
+            )[:24]
+            recovery = self.store.get(eid, "control_recovery", recovery_key, {"generation": 0})
+            identity = (
+                "regression" if recovery["generation"] == 0 else f"regression:resume-{recovery['generation']}"
             )
+            try:
+                a, b = await self.evaluate_pair(
+                    eid, task, identity, round_id, pool, candidate, treatment_pool=treatment_pool
+                )
+            except PairedInfrastructureError:
+                self.store.put(
+                    eid,
+                    "control_recovery",
+                    recovery_key,
+                    {"generation": recovery["generation"] + 1, "pending_operator_resume": True},
+                )
+                raise
             if not a.result or not b.result or a.result.infrastructure_error or b.result.infrastructure_error:
-                return False
+                raise GatewayError(
+                    "Regression infrastructure unavailable; candidate decision remains pending"
+                )
             if a.result.success and not b.result.success:
                 return False
             if any(
@@ -247,7 +382,12 @@ class Engine:
                 raise ValueError("Sampler violated development/admission separation")
             if task.task_id in state.task_ids:
                 raise ValueError("Sampler repeated an admission task")
-            a, b = await self.evaluate_pair(eid, task, f"pair-{slot}-{index}", round_id, pool, candidate)
+            infrastructure_failure = None
+            try:
+                a, b = await self.evaluate_pair(eid, task, f"pair-{slot}-{index}", round_id, pool, candidate)
+            except PairedInfrastructureError as exc:
+                a, b = exc.results
+                infrastructure_failure = exc
             valid = all(
                 x.status not in ("infrastructure_error", "dollar_cap_reached")
                 and not (x.result and x.result.infrastructure_error)
@@ -272,6 +412,9 @@ class Engine:
                     (gate_kind, trial_id, state),
                 ],
             )
+            if infrastructure_failure:
+                # Consume this draw once, preserve its invalidity, and pause. Resume draws a new task.
+                raise infrastructure_failure
         self.store.event(
             eid,
             "control.admission_decision",
@@ -452,6 +595,7 @@ class Engine:
         ):
             raise ValueError("Frozen experiment binding changed; create a new experiment")
         exp["status"] = "running"
+        exp["execution_epoch"] = exp.get("execution_epoch", 0) + 1
         self.store.put(eid, "experiment", eid, exp)
         try:
             for round_id in range(1, 4):
@@ -516,14 +660,34 @@ class Engine:
                 admitted = [c for c in tested if c.status == LessonStatus.ADMITTED]
                 lessons = list(pool.lessons)
                 for c in admitted:
-                    if (set(c.conflicts_with) - set(c.supersedes)) & {x.lesson_id for x in lessons}:
+                    findings = review_draft(c, lessons)
+                    reverse_conflicts = [
+                        x.lesson_id
+                        for x in lessons
+                        if c.lesson_id in x.conflicts_with and x.lesson_id not in c.supersedes
+                    ]
+                    if findings or reverse_conflicts:
                         c.status = LessonStatus.QUARANTINED
-                        c.decision_reason = "Composition conflict"
+                        c.decision_reason = "Composition conflict or duplicate: " + json.dumps(
+                            {"findings": findings, "reverse_conflicts": reverse_conflicts}, sort_keys=True
+                        )
+                        self.store.put(eid, "lesson_history", digest(c), c)
                         self.store.put(eid, "lesson", c.lesson_id, c)
+                        self.store.event(
+                            eid,
+                            "lesson.composition_quarantined",
+                            {
+                                "lesson_id": c.lesson_id,
+                                "trial_id": c.trial_id,
+                                "reason": c.decision_reason,
+                                "selection_order": "registered learner slot order",
+                            },
+                        )
                     else:
                         # Immutable snapshots retain prior versions; current records expose lifecycle status.
                         lessons = [x for x in lessons if x.lesson_id not in c.supersedes]
                         lessons.append(c)
+                admitted = [c for c in admitted if c.status == LessonStatus.ADMITTED]
                 proposed = make_pool(
                     eid, round_id, lessons, pool.pool_hash, [c.trial_id for c in admitted if c.trial_id]
                 )

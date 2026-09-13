@@ -65,6 +65,37 @@ async def test_docker_references_and_containment_when_enabled():
         assert reference.success, reference.model_dump()
         negative = await evaluator.evaluate(task, registry.negative_source(task), workspace)
         assert not negative.success and negative.infrastructure_error is None
+    # A valid alternate implementation must pass; acceptance is behavioral, not exact-source matching.
+    task = registry.generate(Partition.CALIBRATION, 0)
+    alternative = (
+        registry.reference_source(task)
+        .replace(
+            "return sum(r['amount'] for r in rows) * value",
+            "total = 0\n        for row in rows:\n            total += row['amount']\n        return total * value",
+        )
+        .replace("def calculation():", "def alternate_calculation():")
+    )
+    alternate = await evaluator.evaluate(task, alternative, workspace)
+    assert alternate.success, alternate.model_dump()
+    fake_widget = registry.reference_source(task).replace(
+        "control = mo.ui.slider(start=-5, stop=15, step=1, value=1, label='Threshold')",
+        "from types import SimpleNamespace as _Namespace\n    control = _Namespace(value=1)",
+    )
+    fake = await evaluator.evaluate(task, fake_widget, workspace)
+    assert not fake.success and fake.infrastructure_error is None
+    state_task = registry.generate(Partition.CALIBRATION, 9)
+    bypass_state = (
+        registry.reference_source(state_task)
+        .replace(
+            "def transform(compute, records, get_value):",
+            "def transform(compute, records, get_value, control):",
+        )
+        .replace("compute(records, get_value())", "compute(records, control.value)")
+    )
+    bypass = await evaluator.evaluate(state_task, bypass_state, workspace)
+    assert not bypass.success and any(
+        c.name.startswith("direct_state") and not c.passed for c in bypass.checks
+    )
     task = registry.generate(Partition.CALIBRATION, 0)
     containment = """import os, socket
 assert os.getuid() == 65534
@@ -95,7 +126,7 @@ async def test_real_browser_slider_and_form_when_enabled():
     registry = TaskRegistry("runtime", "docs")
     evaluator = RuntimeEvaluator(registry)
     workspace = Path.cwd() / ".herd" / ("browser-test-" + uuid.uuid4().hex)
-    for seed in (3, 7):
+    for seed in range(12):
         task = registry.generate(Partition.CALIBRATION, seed)
         result = await evaluator.evaluate(task, registry.reference_source(task), workspace, browser=True)
         assert result.success, result.model_dump()
@@ -263,3 +294,14 @@ async def test_browser_preflight_cancellation_acquires_and_closes_launched_child
     with pytest.raises(asyncio.CancelledError):
         await operation
     assert state == ["browser_closed", "driver_stopped"]
+
+
+def test_browser_duplicate_task_elements_are_candidate_failure_not_infrastructure():
+    from playwright.async_api import Error
+
+    from herd.adapters.browser_oracle import classify_browser_error
+
+    result = classify_browser_error(Error("Locator resolved to two elements: strict mode violation"))
+    assert result.name == "browser_behavior" and not result.passed
+    with pytest.raises(OSError, match="Browser infrastructure failed"):
+        classify_browser_error(Error("Target page, context or browser has been closed"))

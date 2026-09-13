@@ -9,7 +9,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Literal
 
-from fastapi import FastAPI, Header, HTTPException, Request
+from fastapi import FastAPI, Header, HTTPException, Query, Request
 from pydantic import BaseModel, ConfigDict, Field
 
 from herd.store import Store
@@ -47,6 +47,7 @@ def create_app(store: Store | None = None, engine=None, demo=False):
     @asynccontextmanager
     async def lifespan(app):
         with store.maintenance_lock():
+            store.reconcile_abandoned()
             try:
                 yield
             finally:
@@ -97,22 +98,70 @@ def create_app(store: Store | None = None, engine=None, demo=False):
         return {"status": "ok" if store.health()["database"] == "ok" else "degraded", "demo": demo}
 
     @app.get("/api/experiments")
-    def experiments():
-        return store.experiments()
+    def experiments(limit: int = Query(100, ge=1, le=200), offset: int = Query(0, ge=0)):
+        return store.experiments(limit, offset)
+
+    @app.get("/api/readiness")
+    async def readiness():
+        from fastapi.responses import JSONResponse
+
+        from herd.config import runtime_readiness
+
+        checks = await asyncio.to_thread(runtime_readiness, engine)
+        checks["database_healthy"] = store.health()["database"] == "ok"
+        checks["runtime_preflight_ready"] = False
+        checks["browser_launch_ready"] = False
+        evaluator = getattr(getattr(engine, "learner", None), "evaluator", None)
+        if evaluator is not None:
+            try:
+                runtime = await evaluator.preflight(browser=True)
+                checks["runtime_preflight_ready"] = bool(
+                    runtime.get("ready") and runtime.get("secure_for_generated_code")
+                )
+                checks["browser_launch_ready"] = bool(runtime.get("browser", {}).get("ready"))
+            except Exception:  # noqa: BLE001 - readiness must report unavailable dependencies without crashing
+                checks["runtime_preflight_ready"] = False
+        ready = all(checks.values()) and not demo
+        return JSONResponse(
+            {"ready": ready, "checks": checks, "demo": demo}, status_code=200 if ready else 503
+        )
+
+    collection_kinds = {
+        "lesson",
+        "gate",
+        "pair",
+        "weave_link",
+        "lifecycle",
+        "curriculum",
+        "draft_review",
+        "poisoning_control",
+        "control_gate",
+        "lesson_history",
+        "aria_analysis",
+        "calibration",
+    }
+
+    @app.get("/api/experiments/{eid}/collections/{kind}")
+    def collection(eid: str, kind: str, limit: int = Query(100, ge=1, le=200), offset: int = Query(0, ge=0)):
+        experiment(eid)
+        if kind not in collection_kinds:
+            raise HTTPException(404, "Unknown evidence collection")
+        return store.page(eid, kind, limit, offset)
 
     @app.get("/api/experiments/{eid}")
     def details(eid: str):
         exp = experiment(eid)
         head = store.get(eid, "head", "current", {})
+        page = store.page(eid, "attempt", 100)
         return {
             "experiment": exp,
+            "attempts": [attempt_summary(a) for a in page["items"]],
+            "attempt_page": {k: v for k, v in page.items() if k != "items"},
             **{
-                plural: store.list(eid, singular)
+                plural: store.page(eid, singular, 100)["items"]
                 for plural, singular in [
-                    ("attempts", "attempt"),
                     ("lessons", "lesson"),
                     ("gates", "gate"),
-                    ("pairs", "pair"),
                     ("weave_links", "weave_link"),
                     ("lifecycle_requests", "lifecycle"),
                     ("curriculum_decisions", "curriculum"),
@@ -122,16 +171,76 @@ def create_app(store: Store | None = None, engine=None, demo=False):
                     ("lesson_history", "lesson_history"),
                 ]
             },
+            "collection_pages": {
+                kind: {k: v for k, v in store.page(eid, kind, 100).items() if k != "items"}
+                for kind in collection_kinds
+            },
             "control": store.control(eid),
             "pool": store.get(eid, "pool", head.get("pool_hash", "")),
-            "events": store.events(eid),
-            "report": store.get(eid, "report", "current"),
+            "events": [],
+            "report": None,
+            "report_available": store.get(eid, "report", "current") is not None,
         }
 
-    @app.get("/api/experiments/{eid}/events")
-    def events(eid: str):
+    def attempt_summary(value):
+        return {
+            key: value.get(key)
+            for key in (
+                "run_id",
+                "task_id",
+                "learner_id",
+                "logical_learner_id",
+                "retry_of",
+                "round_id",
+                "arm",
+                "status",
+                "pool_hash",
+                "first_submission_success",
+                "submissions",
+                "tool_calls",
+                "input_tokens",
+                "output_tokens",
+                "cost_usd",
+                "mode",
+                "started_at",
+                "completed_at",
+                "retrieved_lesson_ids",
+            )
+        } | {
+            "result": {k: value["result"].get(k) for k in ("success", "infrastructure_error", "duration_ms")}
+            if value.get("result")
+            else None
+        }
+
+    @app.get("/api/experiments/{eid}/attempts")
+    def attempts(eid: str, limit: int = Query(100, ge=1, le=200), offset: int = Query(0, ge=0)):
         experiment(eid)
-        return store.events(eid)
+        page = store.page(eid, "attempt", limit, offset)
+        page["items"] = [attempt_summary(a) for a in page["items"]]
+        return page
+
+    @app.get("/api/experiments/{eid}/attempts/{run_id}")
+    def attempt_artifact(eid: str, run_id: str):
+        experiment(eid)
+        record = store.get(eid, "attempt", run_id)
+        if not record:
+            raise HTTPException(404, "Unknown attempt")
+        return record
+
+    @app.get("/api/experiments/{eid}/events")
+    def events(eid: str, after: int = Query(0, ge=0), limit: int = Query(100, ge=1, le=200)):
+        experiment(eid)
+        return store.event_page(eid, after, limit)
+
+    @app.get("/api/experiments/{eid}/failure-clusters")
+    def failure_clusters(eid: str):
+        experiment(eid)
+        from herd.reports import first_failure_clusters
+
+        return first_failure_clusters(
+            store.list(eid, "attempt"),
+            {t["task_id"] for t in store.list(eid, "task") if t["partition"] == "development"},
+        )
 
     @app.get("/api/experiments/{eid}/report")
     def report(eid: str):
@@ -155,7 +264,11 @@ def create_app(store: Store | None = None, engine=None, demo=False):
         experiment(eid)
         if eid in running and not running[eid].done():
             return {"status": "running", "control": store.control(eid)}
-        store.request_control(eid, "resume")
+        try:
+            with store.execution_lock():
+                store.request_control(eid, "resume")
+        except RuntimeError:
+            raise HTTPException(409, "A scheduler already owns this state directory") from None
 
         async def execute():
             try:
@@ -173,14 +286,17 @@ def create_app(store: Store | None = None, engine=None, demo=False):
         exp = experiment(eid)
         action = request.url.path.rsplit("/", 1)[-1]
         command = store.request_control(eid, action)
-        if eid not in running or running[eid].done():
-            store.put(
-                eid,
-                "experiment",
-                eid,
-                {**exp, "status": "paused" if action == "pause" else "cancelled"},
-                expected=exp,
-            )
+        try:
+            with store.execution_lock():
+                store.put(
+                    eid,
+                    "experiment",
+                    eid,
+                    {**exp, "status": "paused" if action == "pause" else "cancelled"},
+                    expected=exp,
+                )
+        except RuntimeError:
+            pass  # An API or external CLI scheduler will apply the command at its checkpoint.
         return {
             "status": f"{action}_requested",
             "control": command,

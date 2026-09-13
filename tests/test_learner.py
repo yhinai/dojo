@@ -103,3 +103,43 @@ async def test_measured_runtime_not_ready_never_spends_tokens(tmp_path, reason):
     assert attempt.result.infrastructure_error == reason
     assert attempt.cost_usd == 0 and attempt.input_tokens == 0 and attempt.output_tokens == 0
     assert not gateway.prompts
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("partition", list(Partition))
+async def test_browser_partition_policy_and_initial_failure_evidence(tmp_path, partition):
+    from herd.learner import requires_browser
+
+    class Evaluator(FixtureEvaluator):
+        async def evaluate(self, task, source, workspace, browser=False):
+            assert browser == (
+                partition in (Partition.DEVELOPMENT, Partition.CALIBRATION, Partition.DEMONSTRATION)
+            )
+            return BehaviorResult(
+                task_id=task.task_id,
+                success=source == "good",
+                mode="test",
+                checks=[CheckResult(name="semantic_probe", passed=source == "good")],
+            )
+
+    selected = task().model_copy(update={"partition": partition})
+    record = await Learner(FixtureGateway(), Evaluator(), tmp_path).attempt(
+        selected, "run", "worker", 1, "pool"
+    )
+    assert record.result.success
+    assert record.initial_result is not None and not record.initial_result.success
+    assert requires_browser(selected) == (
+        partition in (Partition.DEVELOPMENT, Partition.CALIBRATION, Partition.DEMONSTRATION)
+    )
+
+
+@pytest.mark.asyncio
+async def test_episode_timeout_during_provider_request_is_not_a_worker_failure(tmp_path):
+    class Gateway(FixtureGateway):
+        async def complete(self, *args, **kwargs):
+            raise TimeoutError("in-flight provider outcome unknown")
+
+    record = await Learner(Gateway(), FixtureEvaluator(), tmp_path).attempt(task(), "timeout", "a", 1, "pool")
+    assert record.status == "infrastructure_error"
+    assert record.infrastructure_kind == "provider"
+    assert record.result is None

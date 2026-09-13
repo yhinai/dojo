@@ -215,6 +215,12 @@ class RuntimeEvaluator:
                 ]
             )
             return result
+        for name, passed in self.registry.structure_requirements(task, source):
+            result.checks.append(
+                CheckResult(name=name, passed=passed, detail="Publicly requested cell structure")
+            )
+        if not all(c.passed for c in result.checks):
+            return result
         # Unique directory mounts exactly one source, never the experiment/pool/oracle tree.
         sandbox = Path(workspace) / ("submission-" + uuid.uuid4().hex)
         sandbox.mkdir(parents=True)
@@ -306,7 +312,7 @@ class RuntimeEvaluator:
                     detail="Fresh runner imported the notebook and completed app.run with required outputs",
                 )
             )
-            expected_initial = self.registry.expected(task, task.public_fixture["records"], 1)
+            expected_initial = self.registry.expected_result(task)
             result.checks.append(
                 CheckResult(name="initial_result", passed=observed.get("initial") == expected_initial)
             )
@@ -323,12 +329,58 @@ class RuntimeEvaluator:
                     result.checks.append(
                         CheckResult(
                             name=f"{field}_{index}",
-                            passed=output.get(field) == expected,
+                            passed=output.get(field)
+                            == (
+                                expected
+                                if field == "function"
+                                else self.registry.expected_result(task, probe)
+                            ),
                             detail="Behavior matches host oracle"
-                            if output.get(field) == expected
+                            if output.get(field)
+                            == (
+                                expected
+                                if field == "function"
+                                else self.registry.expected_result(task, probe)
+                            )
                             else "Behavior mismatch",
                         )
                     )
+                if probe["contract"] == "local_scope":
+                    for field, predicate in (
+                        ("positive_preview", lambda r: r["amount"] >= 0),
+                        ("negative_preview", lambda r: r["amount"] < 0),
+                    ):
+                        result.checks.append(
+                            CheckResult(
+                                name=f"{field}_{index}",
+                                passed=output.get(field) == [r for r in probe["records"] if predicate(r)],
+                            )
+                        )
+                if probe["contract"] == "duplicate_repair":
+                    result.checks.append(
+                        CheckResult(
+                            name=f"preparation_total_{index}",
+                            passed=output.get("preview_total") == sum(r["amount"] for r in probe["records"]),
+                        )
+                    )
+                if probe["contract"] == "stop":
+                    result.checks.append(
+                        CheckResult(
+                            name=f"conditional_execution_{index}",
+                            passed=output.get("result_defined") == probe["enabled"],
+                        )
+                    )
+                if probe["contract"] == "state":
+                    state_expected = self.registry.expected(task, probe["records"], probe["state_value"])
+                    result.checks.append(
+                        CheckResult(
+                            name=f"direct_state_{index}",
+                            passed=output.get("direct_state_result") == state_expected,
+                        )
+                    )
+            result.checks.append(
+                CheckResult(name="actual_marimo_widgets", passed=observed.get("actual_ui_objects") is True)
+            )
             if browser and all(c.passed for c in result.checks):
                 from herd.adapters.browser_oracle import BrowserOracle
 

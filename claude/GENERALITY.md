@@ -251,3 +251,9 @@ Allowed: “Candidate admitted after these paired trials and registered checks; 
 Not supported: “Proven correct,” “helps every agent,” “95% safe,” “no future regressions,” or “five agents voted yes, so statistically verified.”
 
 The point is to turn a plausible lesson into accountable evidence, without making a stronger claim than the experiment can support.
+
+## Runtime retry implementation policy
+
+Infrastructure failures are distinct from worker behavioral failures. A transient runtime failure gets one bounded fresh-session retry. Within paired admission or regression comparisons, both arms restart together on the same task; the failed comparison contributes no statistical evidence, and all original costs/artifacts remain recorded. If the second paired attempt fails, admission consumes one invalid draw and pauses; a resumed gate uses the next registered task. Regression infrastructure failure keeps the candidate undecided and pauses rather than vetoing it as harmful. An explicit operator resume permits the recorded next recovery generation.
+
+Provider timeouts and unknown billed requests never use this automatic runtime retry: they retain their reservation and require billing reconciliation before another paid generation. A successful singleton retry retains its original logical learner/repeat identity for matched final comparisons. Gates stop without admission when even all remaining pairs winning cannot reach the registered threshold. This does not change alpha or manufacture evidence.

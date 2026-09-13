@@ -9,7 +9,7 @@ This document describes executable code, not measured claims about agent learnin
 | Contracts | Pydantic task, attempt, lesson, pool, pair, gate, event, and report models |
 | Persistence | WAL SQLite state, compare-and-swap pool updates, append-only hash-chain events |
 | Tasks | Five tracks, 12 registered families, partitioned deterministic generation, changed-input private probes, references and known negatives |
-| Runtime | Real marimo App.run evaluation; Docker network denied, read-only root/source, non-root, CPU/memory/PID limits; generated notebook success requires fresh browser startup and registered interaction checks |
+| Runtime | Real marimo App.run evaluation; Docker network denied, read-only root/source, non-root, CPU/memory/PID limits; development, calibration and demo use fresh browser startup/interaction checks; admission, regression and final use real headless behavioral probes |
 | Workers | Fresh-context provider calls, bounded JSON actions, notebook repair, verified-repair-only distillation |
 | Budget | Durable per-request reservation, verified model rates, unknown outcomes retained, global dollar cap |
 | Memory | Scoped lesson schema, duplicate/unsafe-content rejection, runtime matching, fixed tag-based bounded retrieval |
@@ -25,9 +25,9 @@ This document describes executable code, not measured claims about agent learnin
 
 No model or W&B credentials were present during implementation. Live inference, remote trace URLs, an ARIA analysis, and a completed 720-episode comparison therefore remain unexecuted. Empty dashboard metrics are intentional. Set credentials locally in `.env`; do not include secrets in evidence or commits.
 
-`herd preflight` executes local runtime readiness checks without paid model calls. Measured workers check Docker image availability, sandbox readiness and Chromium before inference. A generated notebook cannot count as successful solely because its headless probes pass: browser startup and the registered interaction must also succeed. The fixture-only validation command can still omit its additional browser checks unless `--browser` is selected.
+`herd preflight` executes local runtime readiness checks without paid model calls. Measured workers check Docker image availability and sandbox readiness before inference. Development, calibration and demonstration additionally require Chromium readiness and browser startup/interaction checks on headless-passing submissions. Admission, regression and final evaluation use real headless probes without launching a browser per episode. The fixture-only validation command can still omit its additional browser checks unless `--browser` is selected.
 
-The default $10 allowance is an initial inference cap, not a promise that the maximum-size experiment fits within $10. It excludes separate ARIA/hosting charges. The runtime and worker limits are enforced independently. Spend includes model calls for distillation; individual episode costs do not include that separate operation.
+The default $25 allowance is an initial inference cap, not a promise that the maximum-size experiment fits within $25. It excludes separate ARIA/hosting charges. The runtime and worker limits are enforced independently. Spend includes model calls for distillation; individual episode costs do not include that separate operation.
 
 The registered tasks are synthetic marimo transfer tasks. Held-out compositions add unseen input conditions, but related operation families occur during development. Results support claims only about this registered task distribution, not arbitrary tools or general agent intelligence. A single learned pool does not estimate variability across entire learning runs.
 
@@ -48,13 +48,13 @@ python3 claude/verify_architecture.py
 
 Browser and Docker validations require those runtimes. Unit tests use explicit test workers where deterministic behavior is needed and never produce measured learning evidence.
 
-## Local verification evidence — 2026-09-13
+## Historical local verification — before review remediation
 
 The complete deterministic scheduler test exercises 45 development episodes, all 15 candidate slots, the three immutable round barriers, and all 720 final episodes. It uses `mode=test`; its outcomes are not empirical learning results. Resume of a completed experiment performs no extra worker calls.
 
 Actual Docker tests pass all 12 held-out reference families and reject their negative controls. Containment probes verify non-root uid 65534, absence of provider-key environment variables, denied root-filesystem writes, and denied outbound TCP. Actual Chromium checks verify immediate slider reactivity and form changes remaining uncommitted until Apply. Local evidence lives in ignored `.herd/docker-test-*`, `.herd/browser-test-*`, and `.herd/browser-validation/report.json`.
 
-The tested immutable image is `sha256:b763ac378207e9e17f1beee2d7cbdf33959619bc54d23ede0984b200f81d4c73`. The CLI resolves the image tag to an immutable ID, combines it with the runtime/source/lock hash, and freezes that binding in each experiment. Colima was started for these tests; repository workspaces are mounted, while arbitrary host `/tmp` paths may not be.
+The historical, now superseded tested immutable image was `sha256:b763ac378207e9e17f1beee2d7cbdf33959619bc54d23ede0984b200f81d4c73`. The CLI resolves the image tag to an immutable ID, combines it with the runtime/source/lock hash, and freezes that binding in each experiment. Colima was started for these tests; repository workspaces are mounted, while arbitrary host `/tmp` paths may not be.
 
 Run the complete suite, including real containment and browser checks:
 
@@ -85,7 +85,7 @@ Local targeted verification passed 19 delivery/report/integration tests, includi
 
 The application remains a dedicated single-operator system with a synthetic registered task distribution. Credential-free tests prove the implemented state transitions and runtime behavior; they do not establish learning improvement, statistical power under a real model, sponsor availability or production multi-tenancy.
 
-## Final independent verification — 2026-09-13
+## Historical independent verification — before review remediation
 
 Independent review and the final repository-wide checks completed successfully:
 
@@ -98,3 +98,26 @@ Independent review and the final repository-wide checks completed successfully:
 - `git diff --check`: passed.
 
 These results verify the credential-free implementation and real local runtime checks. Live learning, remote sponsor uploads, hosted deployment, and measured learning improvement remain unexecuted; no test-worker outcome is presented as a measured agent result.
+
+## Review remediation — implementation and evidence boundaries
+
+The review correctly identified task homogeneity, excessive browser work, transient-error handling, missing hook data, and calibration needs. Its statement that Weave initialized *only* during `sync-weave` was inaccurate: `make_engine` already initialized `WANDB_PROJECT`; initialization now also honors `HERD_WEAVE_PROJECT`. Actual execution additionally logs completed paired worker rows with the installed SDK's `EvaluationLogger`; the durable recorded-result replay remains separately labeled. Conversation tracing is opt-in through `HERD_TRACE_CONVERSATIONS=1`, with credential values redacted. No real sponsor upload has been performed.
+
+API startup reconciles abandoned running states while holding the global scheduler lease. It cannot mark an active external CLI scheduler abandoned. Stop requests wait for that scheduler's checkpoint. `/api/health` is liveness; `/api/readiness` independently reports database health, engine/provider configuration, immutable Docker image availability and actual cached runtime preflight with Chromium launch. It returns HTTP 503 unless all checks pass; browser binary presence alone is insufficient.
+
+Attempt lists and event trails are bounded pages. Full notebook source/conversation artifacts and final reports load on demand; the dashboard exposes attempt offsets and event cursors and labels its selected-page learner summaries. Round-one failure clusters use each attempt's preserved first submission, excluding infrastructure errors. The demo assembler exports the cluster evidence without inferring failures from successfully repaired terminal results.
+
+Calibration reports measured first-submission rates, per-episode cost/latency and maximum-protocol workload projections, including control episodes and separately identified auxiliary-call assumptions. The 30–50% failure band is a design target, not a promised outcome; first-submission success above 85% triggers a warning. The default allowance is now $25, still a hard cap rather than a guarantee of completion.
+
+CI has a deterministic subset job and a separate Docker/Chromium integration job. A local all-runtimes result must not be attributed to the subset CI job. Live calibration, statistical power and learning gains require actual model execution and are intentionally unclaimed.
+
+## Current revision verification — 2026-09-13
+
+The post-review runtime is bound to immutable image `sha256:dfbe4862ca0f3e613790d7965a22689e1bd19cd20769816282bbd94338b801f1`.
+
+- `HERD_DOCKER_TESTS=1 HERD_BROWSER_TESTS=1 uv run pytest -q`: **119 passed, zero skipped**, in **64.58 seconds**, with two upstream deprecation warnings.
+- After removing the redundant Playwright binary probe, the seven API tests passed again. A real `make_engine`/TestClient readiness smoke exited cleanly: Docker, Chromium launch and database checks passed; missing provider credentials correctly produced HTTP 503.
+- Ruff F checks passed across source, tests and scripts. `marimo check`, architecture verification, deployment shell syntax, official Caddy configuration validation and `git diff --check` passed.
+- Actual Docker/Chromium preflight passed. The dashboard loaded through Playwright with **zero page errors**.
+
+Historical counts and image IDs above describe the earlier implementation. These checks establish local implementation and runtime behavior; live model calibration, sponsor uploads, learning gains and public deployment remain unexecuted. No calibration success rate or transferable-learning improvement has been manufactured.
