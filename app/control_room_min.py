@@ -117,7 +117,7 @@ def _(fetch, picker, quote):
     if picker.value:
         try:
             detail = fetch(f"/api/experiments/{quote(picker.value, safe='')}")
-            attempts = fetch(f"/api/experiments/{quote(picker.value, safe='')}/attempts?offset=0&limit=500")["items"]
+            attempts = fetch(f"/api/experiments/{quote(picker.value, safe='')}/attempts?offset=0&limit=200")["items"]
         except Exception as _e:  # noqa: BLE001
             error = f"Could not load experiment ({type(_e).__name__})."
     return attempts, detail, error
