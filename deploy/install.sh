@@ -6,6 +6,14 @@ set -eu
 command -v uv >/dev/null
 command -v docker >/dev/null
 command -v caddy >/dev/null
+docker info >/dev/null 2>&1 || {
+    echo 'Docker Engine is installed but not reachable; start the daemon before installing HERD.' >&2
+    exit 1
+}
+[ -r deploy/herd-api.service ] || { echo 'Missing deployment service files; use the complete checkout'; exit 1; }
+[ -r deploy/herd-dashboard.service ] || { echo 'Missing deployment service files; use the complete checkout'; exit 1; }
+[ -r deploy/herd.env.example ] || { echo 'Missing deployment environment template; use the complete checkout'; exit 1; }
+[ -r app/control_room.py ] || { echo 'Missing control room notebook; use the complete checkout'; exit 1; }
 id herd >/dev/null 2>&1 || useradd --system --home /var/lib/herd --create-home herd
 usermod -aG docker herd
 install -d -o herd -g herd -m 0700 /var/lib/herd

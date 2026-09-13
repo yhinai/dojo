@@ -23,7 +23,7 @@ This document describes executable code, not measured claims about agent learnin
 
 ## Execution prerequisites and limits
 
-No model or W&B credentials were present during implementation. Live inference, remote trace URLs, an ARIA analysis, and a completed 720-episode comparison therefore remain unexecuted. Empty dashboard metrics are intentional. Set credentials locally in `.env`; do not include secrets in evidence or commits.
+No model or W&B credentials were present during the original implementation pass. The current sponsor baseline has separately verified authenticated W&B/Inference access and a real Weave publish; live inference, an ARIA analysis, and a completed 720-episode comparison remain unexecuted. Empty dashboard metrics are intentional. Set credentials locally in `.env`; do not include secrets in evidence or commits.
 
 `herd preflight` executes local runtime readiness checks without paid model calls. Measured workers check Docker image availability and sandbox readiness before inference. Development, calibration and demonstration additionally require Chromium readiness and browser startup/interaction checks on headless-passing submissions. Admission, regression and final evaluation use real headless probes without launching a browser per episode. The fixture-only validation command can still omit its additional browser checks unless `--browser` is selected.
 
@@ -97,11 +97,11 @@ Independent review and the final repository-wide checks completed successfully:
 - Caddy container configuration validation and deployment shell syntax checks: passed.
 - `git diff --check`: passed.
 
-These results verify the credential-free implementation and real local runtime checks. Live learning, remote sponsor uploads, hosted deployment, and measured learning improvement remain unexecuted; no test-worker outcome is presented as a measured agent result.
+These results verify the credential-free implementation and real local runtime checks. The sponsor baseline separately records the live W&B/Weave/Inference checks; live learning, hosted deployment, and measured learning improvement remain unexecuted. No test-worker outcome is presented as a measured agent result.
 
 ## Review remediation — implementation and evidence boundaries
 
-The review correctly identified task homogeneity, excessive browser work, transient-error handling, missing hook data, and calibration needs. Its statement that Weave initialized *only* during `sync-weave` was inaccurate: `make_engine` already initialized `WANDB_PROJECT`; initialization now also honors `HERD_WEAVE_PROJECT`. Actual execution additionally logs completed paired worker rows with the installed SDK's `EvaluationLogger`; the durable recorded-result replay remains separately labeled. Conversation tracing is opt-in through `HERD_TRACE_CONVERSATIONS=1`, with credential values redacted. No real sponsor upload has been performed.
+The review correctly identified task homogeneity, excessive browser work, transient-error handling, missing hook data, and calibration needs. Its statement that Weave initialized *only* during `sync-weave` was inaccurate: `make_engine` already initialized `WANDB_PROJECT`; initialization now also honors `HERD_WEAVE_PROJECT`. Actual execution additionally logs completed paired worker rows with the installed SDK's `EvaluationLogger`; the durable recorded-result replay remains separately labeled. Conversation tracing is opt-in through `HERD_TRACE_CONVERSATIONS=1`, with credential values redacted. A sponsor-baseline Weave object was subsequently published; this does not constitute a completed learning experiment or measured improvement.
 
 API startup reconciles abandoned running states while holding the global scheduler lease. It cannot mark an active external CLI scheduler abandoned. Stop requests wait for that scheduler's checkpoint. `/api/health` is liveness; `/api/readiness` independently reports database health, engine/provider configuration, immutable Docker image availability and actual cached runtime preflight with Chromium launch. It returns HTTP 503 unless all checks pass; browser binary presence alone is insufficient.
 
