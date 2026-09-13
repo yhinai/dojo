@@ -50,6 +50,8 @@ class GatewayConfig:
 
     @classmethod
     def from_env(cls):
+        from .config import wandb_project
+
         default_model = cls.model
         model = os.getenv("HERD_MODEL", default_model)
         base_url = os.getenv("HERD_INFERENCE_BASE_URL", cls.base_url)
@@ -67,7 +69,7 @@ class GatewayConfig:
             model=model,
             base_url=base_url,
             api_key=os.getenv("HERD_INFERENCE_API_KEY") or os.getenv("WANDB_API_KEY", ""),
-            project=os.getenv("WANDB_PROJECT", ""),
+            project=wandb_project(),
             input_per_million=float(os.getenv("HERD_INPUT_PRICE_PER_MILLION", ".13")),
             output_per_million=float(os.getenv("HERD_OUTPUT_PRICE_PER_MILLION", ".28")),
             cap_usd=float(os.getenv("HERD_DOLLAR_CAP", "25")),

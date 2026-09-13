@@ -74,6 +74,13 @@ def test_other_model_requires_own_prices(monkeypatch):
         GatewayConfig.from_env()
 
 
+def test_gateway_uses_canonical_wandb_project(monkeypatch):
+    monkeypatch.delenv("HERD_WEAVE_PROJECT", raising=False)
+    monkeypatch.setenv("WANDB_ENTITY", "team")
+    monkeypatch.setenv("WANDB_PROJECT", "project")
+    assert GatewayConfig.from_env().project == "team/project"
+
+
 @pytest.mark.asyncio
 async def test_reconciled_retry_preserves_original_charge_and_caches(tmp_path):
     ledger = BudgetLedger(tmp_path / "budget.db", 1)

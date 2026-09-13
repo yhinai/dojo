@@ -8,7 +8,7 @@ from pathlib import Path
 
 import typer
 
-from herd.config import ROOT, configuration, load_environment, provider_capabilities
+from herd.config import ROOT, configuration, load_environment, provider_capabilities, wandb_project
 from herd.store import Store
 
 app = typer.Typer(help="HERD — One agent struggles. Every agent learns.")
@@ -43,7 +43,7 @@ async def sync_all_evidence():
     from herd.integrations.weave import WeaveIntegration
 
     store = Store(state_dir() / "herd.sqlite3")
-    integration = WeaveIntegration(os.getenv("HERD_WEAVE_PROJECT") or os.getenv("WANDB_PROJECT"), state_dir())
+    integration = WeaveIntegration(wandb_project(), state_dir())
     with (state_dir() / "evidence.lock").open("a") as lock:
         try:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -134,9 +134,7 @@ def make_engine():
         from herd.integrations.weave import WeaveIntegration
 
         try:
-            WeaveIntegration(
-                os.getenv("HERD_WEAVE_PROJECT") or os.getenv("WANDB_PROJECT"), state_dir()
-            ).connect()
+            WeaveIntegration(wandb_project(), state_dir()).connect()
         except Exception as exc:  # noqa: BLE001 - durable outbox can recover optional sponsor initialization
             import logging
 
@@ -458,8 +456,20 @@ def sync_weave(experiment_id: str):
     store = Store(state_dir() / "herd.sqlite3")
     if not store.get(experiment_id, "experiment", experiment_id):
         raise typer.BadParameter("Unknown experiment")
-    integration = WeaveIntegration(os.getenv("HERD_WEAVE_PROJECT") or os.getenv("WANDB_PROJECT"), state_dir())
+    integration = WeaveIntegration(wandb_project(), state_dir())
     typer.echo(json.dumps(asyncio.run(integration.sync_store(store, experiment_id)), indent=2))
+
+
+@app.command()
+def sponsor_baseline(publish_weave: bool = False):
+    """Run live, secret-safe checks for every hackathon sponsor integration."""
+    from herd.integrations.sponsors import sponsor_baseline as run_baseline
+
+    load_environment()
+    result = run_baseline(publish_weave=publish_weave)
+    typer.echo(json.dumps(result, indent=2))
+    if result["summary"]["fail"]:
+        raise typer.Exit(1)
 
 
 @app.command()

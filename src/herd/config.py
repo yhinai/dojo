@@ -13,6 +13,9 @@ def load_environment():
     from dotenv import load_dotenv
 
     load_dotenv(ROOT / ".env")
+    # Hackathon credentials are kept in a separate ignored file. An ordinary
+    # .env or an existing process environment still wins when both are present.
+    load_dotenv(ROOT / ".env.hackathon")
     for name in ("WANDB_API_KEY", "HERD_INFERENCE_API_KEY", "HERD_CONTROL_TOKEN", "HERD_API_BASIC_PASSWORD"):
         secret_file = os.getenv(name + "_FILE")
         if secret_file:
@@ -23,6 +26,15 @@ def load_environment():
             if not secret:
                 raise ValueError(f"{name}_FILE is empty")
             os.environ[name] = secret
+
+
+def wandb_project() -> str:
+    """Return the canonical entity/project identifier expected by Weave."""
+    project = os.getenv("HERD_WEAVE_PROJECT") or os.getenv("WANDB_PROJECT", "")
+    entity = os.getenv("WANDB_ENTITY", "")
+    if project and "/" not in project and entity:
+        return f"{entity}/{project}"
+    return project
 
 
 def provider_capabilities():

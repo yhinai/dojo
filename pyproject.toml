@@ -10,7 +10,7 @@ requires-python = ">=3.11"
 dependencies = ["pydantic>=2.10,<3", "httpx>=0.28,<1", "marimo>=0.14,<1", "fastapi>=0.115,<1", "uvicorn>=0.34,<1", "python-dotenv>=1,<2", "typer>=0.15,<1", "tiktoken>=0.9,<1", "playwright>=1.50,<2"]
 
 [project.optional-dependencies]
-weave = ["weave>=0.51,<1"]
+weave = ["weave>=0.51,<1", "wandb>=0.19,<1"]
 dev = ["pytest>=8,<10", "pytest-asyncio>=0.25,<2", "ruff>=0.11,<1"]
 
 [project.scripts]

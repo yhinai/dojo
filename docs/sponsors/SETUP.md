@@ -1,6 +1,6 @@
 # CoreWeave Hacks sponsor setup
 
-Verified September 12, 2026 using Chrome. Account: yahya.s.alhinai@gmail.com.
+Verified September 13, 2026 using Chrome and the live provider APIs. Account: yahya.s.alhinai@gmail.com.
 
 ## Team access
 
@@ -13,10 +13,10 @@ Verified September 12, 2026 using Chrome. Account: yahya.s.alhinai@gmail.com.
 
 | Product | Offer / current state | Remaining step |
 | --- | --- | --- |
-| W&B Inference | Gateway enabled; API verified with 28 models; activation request emailed to Anna | Billing UI still shows the normal $2 allowance, so the $100 quota update remains pending |
+| W&B Inference | Working: authenticated listing returned 28 models and a minimal DeepSeek completion returned visible content | Confirm the advertised $100 quota in billing |
 | TypeSafe AI | Credit form submitted; Google sign-in completed; public waitlist joined | Console remains invite-only; a TypeSafe representative must provision model/API access |
 | Weave | Current Free plan includes 1 GB monthly ingestion | API credential authenticates; real trace verified in `yahya-dojo-hacks/dojo` |
-| marimo / molab | Handbook advertises free cloud GPUs | MFA completed; signed-in notebook created; RTX Pro 6000 (Blackwell) configuration saved, GPU execution not yet tested |
+| marimo / molab | Handbook advertises free cloud GPUs | Working: a hosted sandbox ran `nvidia-smi` on an RTX PRO 6000 Blackwell Server Edition with 97,887 MiB |
 | ARIA | W&B in-app research assistant; no separate credit grant/API key listed | Working in private project `yahya-dojo-hacks/dojo` |
 | W&B Training | Billing shows $500 allowance | Observed allowance only; training availability not tested |
 | Fully Connected | Conditional conference-ticket opportunity | Ask CoreWeave staff for attendee qualification criteria; not an automatic credit |
@@ -28,10 +28,21 @@ Luma says registration approved and event September 12–13. Handbook schedule c
 New key name: `dojo-coreweave-hacks-2026-09-12`, organization `nihalnihalani`.
 Stored in repository-root `.env.hackathon`, mode 0600, ignored by Git. Never commit or print it.
 W&B GraphQL verified the authenticated username `yahya-s-alhinai` and correct email.
-Inference is now enabled and its API returned 28 available models. The billing page still showed the default $2 allowance when checked, so the advertised $100 hackathon quota remains pending.
+Inference authentication requires the usage project in canonical `team/project` form. After correcting the application from `dojo` to `yahya-dojo-hacks/dojo`, the September 13 baseline listed 28 models and completed a real request with `deepseek-ai/DeepSeek-V4-Flash-0731`. The advertised $100 hackathon quota remains unconfirmed in billing.
 TypeSafe's console accepts Google sign-in for `yahya.s.alhinai@gmail.com` but reports that the account is invite-only. The public waitlist submission succeeded. Two messages to the website-listed `hello@typesafe.ai` address bounced because the recipient group does not exist or does not accept posts; use the event organizer or an on-site TypeSafe representative for provisioning.
 
 ## Local tools
+
+Run the secret-safe live baseline from the repository root:
+
+```sh
+uv sync --frozen --extra dev --extra weave
+uv run herd sponsor-baseline --publish-weave
+```
+
+The command authenticates W&B, initializes and optionally publishes a real Weave object, lists the configured provider's models, makes a minimal completion, checks the local marimo control room, and reports the UI/manual boundaries for ARIA and molab. It checks TypeSafe automatically once `TYPESAFE_API_KEY`, `TYPESAFE_BASE_URL`, and `TYPESAFE_MODEL` are provisioned. It never prints credential values or model output.
+
+Latest evidence: W&B authentication passed; Weave published `weave:///yahya-dojo-hacks/dojo/object/herd-sponsor-baseline:VGWnwGG36405n5fo1D0VfraX8LMv8dTcmXqihGYBbXc`; W&B Inference listed 28 models and returned visible content from a minimal completion; marimo validation passed; molab executed on the configured Blackwell GPU; and ARIA opened for the `dojo` project.
 
 Installed global `wandb` 0.30.0, `marimo` 0.24.2, and official `wandb_mcp_server` 0.3.7.
 W&B MCP source commit: `53b199a5f4af29aa82077e2c7f1e2c5e5e0c2ca0`.

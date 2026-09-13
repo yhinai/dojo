@@ -16,6 +16,7 @@ uv run playwright install chromium
 docker build -t herd-runtime:local .
 cp .env.example .env
 uv run herd preflight
+uv run herd sponsor-baseline --publish-weave
 ```
 
 Configure `WANDB_API_KEY`, `WANDB_PROJECT=entity/project`, and a random `HERD_CONTROL_TOKEN` in `.env`. The default worker is W&B Inference `deepseek-ai/DeepSeek-V4-Flash-0731`; the initial global inference cap is **$25**. The full protocol can pause before completion when this cap is exhausted. No credentials are committed or mounted into notebook containers. Different providers/models require explicit verified prices.
@@ -46,6 +47,8 @@ uv run marimo check app/control_room.py
 uv run herd validate-fixtures
 python3 claude/verify_architecture.py
 ```
+
+`herd sponsor-baseline` is the live sponsor check. It authenticates W&B, initializes Weave, validates the configured inference model with a minimal completion, and checks marimo. TypeSafe is checked through the same OpenAI-compatible contract once its sponsor-issued endpoint, model, and key are configured. ARIA and molab are reported as UI-verified integrations because neither supplies a separate API key.
 
 Fixture validation runs real marimo reference and deliberately broken notebooks, but accepts only the exact registered fixtures outside Docker. It is not a learning experiment. `--browser` adds real browser interaction verification and requires installed Playwright Chromium.
 

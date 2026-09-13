@@ -6,6 +6,49 @@ from herd.integrations.aria import export_bundle, import_analysis
 from herd.integrations.weave import WeaveIntegration, behavioral_scores
 
 
+def test_canonical_wandb_project(monkeypatch):
+    from herd.config import wandb_project
+
+    monkeypatch.delenv("HERD_WEAVE_PROJECT", raising=False)
+    monkeypatch.setenv("WANDB_ENTITY", "team")
+    monkeypatch.setenv("WANDB_PROJECT", "project")
+    assert wandb_project() == "team/project"
+    monkeypatch.setenv("HERD_WEAVE_PROJECT", "other/explicit")
+    assert wandb_project() == "other/explicit"
+
+
+def test_sponsor_provider_check_never_returns_credentials(monkeypatch):
+    from herd.integrations.sponsors import _openai_provider
+
+    class Response:
+        status_code = 200
+
+        @staticmethod
+        def json():
+            return {"data": [{"id": "model"}]}
+
+    monkeypatch.setattr("httpx.get", lambda *args, **kwargs: Response())
+    monkeypatch.setattr(
+        "httpx.post",
+        lambda *args, **kwargs: type(
+            "CompletionResponse",
+            (),
+            {
+                "status_code": 200,
+                "json": staticmethod(
+                    lambda: {
+                        "choices": [{"message": {"content": "baseline-ok"}}],
+                        "usage": {"prompt_tokens": 4, "completion_tokens": 2},
+                    }
+                ),
+            },
+        )(),
+    )
+    result = _openai_provider("https://provider.example/v1", "private-token", "model")
+    assert result["status"] == "pass"
+    assert "private-token" not in json.dumps(result)
+
+
 def test_outbox_preserves_pending_and_deduplicates(tmp_path):
     adapter = WeaveIntegration(None, tmp_path)
     adapter.enqueue("event", "event-1", {"a": 1})
@@ -128,9 +171,10 @@ async def test_recovered_upload_creates_authentic_local_link(tmp_path, monkeypat
 @pytest.mark.asyncio
 async def test_live_evaluation_rows_and_privacy(monkeypatch):
     import weave
+    from weave.trace.context import weave_client_context
+
     from herd.integrations.weave import log_execution_pair, sanitize_trace
     from herd.schemas import AttemptRecord
-    from weave.trace.context import weave_client_context
 
     monkeypatch.setattr(weave_client_context, "get_weave_client", lambda: object())
     calls = []
