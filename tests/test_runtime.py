@@ -48,13 +48,13 @@ async def test_real_marimo_reference_and_negative_fixture(seed, tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_docker_references_and_containment_when_enabled():
+async def test_docker_references_and_containment():
     import json
     import os
     import uuid
 
-    if os.environ.get("HERD_DOCKER_TESTS") != "1":
-        pytest.skip("Set HERD_DOCKER_TESTS=1 with the built Docker image for actual containment checks")
+    if os.environ.get("HERD_SKIP_RUNTIME") == "1":
+        pytest.skip("HERD_SKIP_RUNTIME=1 disables Docker containment checks")
     registry = TaskRegistry("runtime", "docs")
     evaluator = RuntimeEvaluator(registry)
     workspace = Path.cwd() / ".herd" / ("docker-test-" + uuid.uuid4().hex)
@@ -117,12 +117,12 @@ except OSError:
 
 
 @pytest.mark.asyncio
-async def test_real_browser_slider_and_form_when_enabled():
+async def test_real_browser_slider_and_form():
     import os
     import uuid
 
-    if os.environ.get("HERD_BROWSER_TESTS") != "1":
-        pytest.skip("Set HERD_BROWSER_TESTS=1 with Docker and Playwright Chromium installed")
+    if os.environ.get("HERD_SKIP_RUNTIME") == "1":
+        pytest.skip("HERD_SKIP_RUNTIME=1 disables browser integration checks")
     registry = TaskRegistry("runtime", "docs")
     evaluator = RuntimeEvaluator(registry)
     workspace = Path.cwd() / ".herd" / ("browser-test-" + uuid.uuid4().hex)

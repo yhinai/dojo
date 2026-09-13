@@ -21,7 +21,7 @@ uv run herd sponsor-baseline --publish-weave
 
 Configure `WANDB_API_KEY`, `WANDB_PROJECT=entity/project`, and a random `HERD_CONTROL_TOKEN` in `.env`. The default worker is W&B Inference `deepseek-ai/DeepSeek-V4-Flash-0731`; the initial global inference cap is **$25**. The full protocol can pause before completion when this cap is exhausted. No credentials are committed or mounted into notebook containers. Different providers/models require explicit verified prices.
 
-`herd preflight` performs local Docker, sandbox and Chromium readiness checks without paid inference. Measured workers check readiness before calling the provider. Generated notebook success requires headless behavior checks plus fresh browser startup and the registered interaction.
+`herd preflight` performs local Docker, sandbox and Chromium readiness checks without paid inference. Measured workers check readiness before calling the provider. Generated notebook success requires headless behavior checks plus fresh browser startup and the registered interaction. The default test suite also runs Docker containment and browser integration checks; set `HERD_SKIP_RUNTIME=1` only on hosts that intentionally lack those runtimes.
 
 ```bash
 uv run herd init                      # prints experiment ID; freezes baselines
