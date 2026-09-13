@@ -70,7 +70,7 @@ def test_budget_exhausted_is_a_task_failure_not_pending():
 
 
 def test_first_failure_hook_uses_initial_not_repaired_outcome():
-    from herd.reports import first_failure_clusters, calibration_report
+    from herd.reports import calibration_report, first_failure_clusters
 
     rows = [
         {

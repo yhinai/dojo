@@ -46,7 +46,7 @@ This is the 4th edition of the W&B agent hackathon (WeaveHacks → CoreWeave Hac
 - **Solver** attempts the task in a sandbox (marimo molab free GPUs — sponsor box ticked)
 - **Judge** runs the code, grades it, and — critically — the Proposer is *rewarded when the Solver fails* (MAE trick), so the curriculum auto-ratchets to the frontier of the Solver's ability
 
-The Solver maintains an **ACE-style playbook**: itemized lessons (`[str-00012] helpful=7 harmful=1 :: marimo cells cannot reference later-defined variables`) that accumulate, get up/down-voted by execution feedback, and are pruned by the Curator role.
+The Solver maintains an **ACE-style playbook**: itemized lessons (`[str-00012] helpful=7 harmful=1 :: define each marimo variable in one cell and return it; execution follows the dependency graph`) that accumulate, get up/down-voted by execution feedback, and are pruned by the Curator role.
 
 **The killer demo moment (30 seconds):** upload the evolved playbook to a *fresh, untrained* agent live on stage → it instantly outperforms its un-trained self. **Skill transfer across agents is the thing everyone talks about and nobody demos.**
 

@@ -1,3 +1,5 @@
+from typing import ClassVar
+
 from fastapi.testclient import TestClient
 
 from herd.api import create_app
@@ -129,7 +131,7 @@ def test_readiness_requires_browser_launch_and_healthy_database(tmp_path, monkey
 
     class Evaluator:
         ready = False
-        calls = []
+        calls: ClassVar[list[bool]] = []
 
         async def preflight(self, browser=False):
             self.calls.append(browser)

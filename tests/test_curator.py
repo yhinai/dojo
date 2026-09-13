@@ -1,22 +1,24 @@
 import json
+
 import pytest
-from herd.curator import curate, retrieve, make_pool, tokens
+
+from herd.curator import curate, make_pool, retrieve, tokens
 from herd.schemas import LessonDraft, LessonStatus
 
 
 def draft(**kwargs):
-    base = dict(
-        lesson_id="l1",
-        runtime_lock_hash="runtime",
-        scope_tags=["widget"],
-        trigger="When using widgets",
-        instruction="Read the widget value in a dependent cell.",
-        does_not_apply="Does not apply to plain Python.",
-        origin_learner_id="one",
-        origin_round=1,
-        origin_task_ids=["task"],
-        repair_run_ids=["run"],
-    )
+    base = {
+        "lesson_id": "l1",
+        "runtime_lock_hash": "runtime",
+        "scope_tags": ["widget"],
+        "trigger": "When using widgets",
+        "instruction": "Read the widget value in a dependent cell.",
+        "does_not_apply": "Does not apply to plain Python.",
+        "origin_learner_id": "one",
+        "origin_round": 1,
+        "origin_task_ids": ["task"],
+        "repair_run_ids": ["run"],
+    }
     return LessonDraft(**(base | kwargs))
 
 

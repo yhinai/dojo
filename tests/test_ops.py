@@ -101,11 +101,11 @@ def test_maintenance_lock_blocks_backup_and_service(tmp_path):
     import fcntl
 
     store = Store(tmp_path / "state.db")
-    with store.maintenance_lock(), (tmp_path / "maintenance.lock").open("a+") as handle:
-        with pytest.raises(BlockingIOError):
-            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    with store.maintenance_lock(), (tmp_path / "maintenance.lock").open("a+") as handle, pytest.raises(
+        BlockingIOError
+    ):
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
     with (tmp_path / "maintenance.lock").open("a+") as handle:
         fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-        with pytest.raises(RuntimeError, match="maintenance"):
-            with store.maintenance_lock():
-                pass
+        with pytest.raises(RuntimeError, match="maintenance"), store.maintenance_lock():
+            pass
