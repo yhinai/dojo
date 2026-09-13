@@ -20,6 +20,7 @@ install -o herd -g herd -m 0644 app/control_room.py /var/lib/herd/control_room.p
 install -d /etc/systemd/system/caddy.service.d
 install -m 0644 deploy/caddy-environment.conf /etc/systemd/system/caddy.service.d/herd.conf
 [ -f /etc/herd/herd.env ] || install -o root -g herd -m 0640 deploy/herd.env.example /etc/herd/herd.env
+[ -f /etc/herd/proxy.env ] || install -o root -g root -m 0600 deploy/proxy.env.example /etc/herd/proxy.env
 systemctl daemon-reload
-echo 'Installed. Configure /etc/herd/herd.env and secrets; configure Caddy authentication; then enable services.'
+echo 'Installed. Configure /etc/herd/herd.env, /etc/herd/proxy.env and secrets; then enable services.'
 echo 'Services were not started and no public port was opened.'

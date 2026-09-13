@@ -94,7 +94,8 @@ def runtime_readiness(engine=None):
     import shutil
     import subprocess
 
-    image = getattr(engine, "config", {}).get("runtime_image_id", "herd-runtime:local")
+    engine_config = getattr(engine, "config", None) or {}
+    image = engine_config.get("runtime_image_id", "herd-runtime:local")
     docker = False
     if shutil.which("docker"):
         try:

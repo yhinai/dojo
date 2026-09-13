@@ -49,6 +49,29 @@ def test_sponsor_provider_check_never_returns_credentials(monkeypatch):
     assert "private-token" not in json.dumps(result)
 
 
+def test_sponsor_provider_requires_https():
+    from herd.integrations.sponsors import _openai_provider
+
+    result = _openai_provider("http://provider.example/v1", "private-token", "model")
+    assert result == {"status": "fail", "detail": "provider endpoint must use HTTPS"}
+
+
+def test_sponsor_provider_rejects_malformed_models_response(monkeypatch):
+    from herd.integrations.sponsors import _openai_provider
+
+    class Response:
+        status_code = 200
+
+        @staticmethod
+        def json():
+            return {"data": ["not-an-object"]}
+
+    monkeypatch.setattr("httpx.get", lambda *args, **kwargs: Response())
+    result = _openai_provider("https://provider.example/v1", "private-token", "model")
+    assert result["status"] == "fail"
+    assert "invalid response shape" in result["detail"]
+
+
 def test_outbox_preserves_pending_and_deduplicates(tmp_path):
     adapter = WeaveIntegration(None, tmp_path)
     adapter.enqueue("event", "event-1", {"a": 1})

@@ -6,6 +6,7 @@ import os
 import subprocess
 from datetime import UTC, datetime
 from pathlib import Path
+from urllib.parse import urlparse
 
 import httpx
 
@@ -21,6 +22,8 @@ def _openai_provider(base_url: str, api_key: str, model: str, project: str = "")
         return _result("pending", "credential is not configured")
     if not base_url or not model:
         return _result("pending", "endpoint and model must be configured")
+    if urlparse(base_url).scheme != "https":
+        return _result("fail", "provider endpoint must use HTTPS")
     headers = {"Authorization": f"Bearer {api_key}"}
     if project:
         headers["OpenAI-Project"] = project
@@ -28,7 +31,11 @@ def _openai_provider(base_url: str, api_key: str, model: str, project: str = "")
         response = httpx.get(base_url.rstrip("/") + "/models", headers=headers, timeout=30)
         if response.status_code != 200:
             return _result("fail", f"models endpoint returned HTTP {response.status_code}")
-        models = [item.get("id") for item in response.json().get("data", [])]
+        payload = response.json()
+        data = payload.get("data") if isinstance(payload, dict) else None
+        if not isinstance(data, list) or not all(isinstance(item, dict) for item in data):
+            return _result("fail", "models endpoint returned an invalid response shape")
+        models = [item.get("id") for item in data]
         if model not in models:
             return _result("fail", "configured model is absent from the authenticated model list", model=model)
         completion = httpx.post(
@@ -48,7 +55,7 @@ def _openai_provider(base_url: str, api_key: str, model: str, project: str = "")
         payload = completion.json()
         usage = payload.get("usage", {})
         content = payload["choices"][0]["message"]["content"]
-        if not content:
+        if not isinstance(content, str) or not content.strip():
             return _result("fail", "completion succeeded but returned no visible content", model=model)
         return _result(
             "pass",
@@ -59,7 +66,7 @@ def _openai_provider(base_url: str, api_key: str, model: str, project: str = "")
             prompt_tokens=usage.get("prompt_tokens"),
             completion_tokens=usage.get("completion_tokens"),
         )
-    except (httpx.HTTPError, ValueError, KeyError) as exc:
+    except (httpx.HTTPError, ValueError, KeyError, TypeError, AttributeError, IndexError) as exc:
         return _result("fail", f"provider check failed: {type(exc).__name__}")
 
 

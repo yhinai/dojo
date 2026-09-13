@@ -12,7 +12,7 @@ The dashboard runs a copy in `/var/lib/herd/control_room.py` to allow marimo's l
 
 ## Authenticate and start
 
-Generate a bcrypt hash with `caddy hash-password`; put it in `/etc/herd/proxy.env` with `HERD_PASSWORD_HASH`, `HERD_OPERATOR`, and `HERD_HOST=your-dns-name`. Use `root:root` and mode `0600`. This file is consumed by the installed Caddy service override. Caddy's [`basic_auth`](https://caddyserver.com/docs/caddyfile/directives/basic_auth) requires a hash and protects the dashboard, API and WebSocket upgrades. Backend read protection independently checks `X-HERD-Token`.
+The installer creates `/etc/herd/proxy.env` from `deploy/proxy.env.example` with mode `0600`. Replace its placeholders: generate a bcrypt hash with `caddy hash-password`, then set `HERD_PASSWORD_HASH`, `HERD_OPERATOR`, and `HERD_HOST=your-dns-name`. This file is consumed by the installed Caddy service override. Caddy's [`basic_auth`](https://caddyserver.com/docs/caddyfile/directives/basic_auth) requires a hash and protects the dashboard, API and WebSocket upgrades. Backend read protection independently checks `X-HERD-Token`.
 
 Copy `/opt/herd/deploy/Caddyfile` to `/etc/caddy/Caddyfile`. Preserve an existing site's configuration if sharing a machine; this package assumes a dedicated host. Validate using the actual configured environment before activating:
 
