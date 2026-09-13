@@ -12,12 +12,14 @@ def _():
     import json
     import math
     import os
-    from herd.config import load_environment as _load_environment
-    _load_environment()
     from urllib.parse import quote
 
     import httpx
     import marimo as mo
+
+    from herd.config import load_environment as _load_environment
+
+    _load_environment()
     def fetch_evidence(path):
         response = httpx.get(os.getenv("HERD_API_URL", "http://127.0.0.1:8000").rstrip("/") + path,
                             headers={"X-Herd-Token": os.getenv("HERD_CONTROL_TOKEN", "")},
