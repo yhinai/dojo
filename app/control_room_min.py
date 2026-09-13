@@ -129,19 +129,19 @@ def _(fetch, picker, quote):
 def _(attempts, detail, error, mo):
     """BEAT 1 — the floor: five learners, round-one reds."""
     ex = detail.get("experiment", {})
-    cards = []
+    _cards = []
     for i in range(1, 6):
         ident = f"learner-{i}"
-        recs = [a for a in attempts if a.get("learner_id") == ident]
-        last = recs[-1] if recs else {}
-        status = (last.get("status") or "awaiting").lower()
-        succ = (last.get("result") or {}).get("success")
-        tone = "ok" if succ is True else ("bad" if succ is False else "wait")
-        label = "passed" if succ is True else ("failed" if succ is False else status)
-        task = last.get("task_id", "—")
-        cards.append(
-            f'<div class="card {tone}"><div class="who">{ident}</div>'
-            f'<span class="st">{label}</span><div class="task">{task}</div></div>'
+        _recs = [a for a in attempts if a.get("learner_id") == ident]
+        _last = _recs[-1] if _recs else {}
+        _status = (_last.get("status") or "awaiting").lower()
+        _succ = (_last.get("result") or {}).get("success")
+        _tone = "ok" if _succ is True else ("bad" if _succ is False else "wait")
+        _label = "passed" if _succ is True else ("failed" if _succ is False else _status)
+        _task = _last.get("task_id", "—")
+        _cards.append(
+            f'<div class="card {_tone}"><div class="who">{ident}</div>'
+            f'<span class="st">{_label}</span><div class="task">{_task}</div></div>'
         )
     mo.vstack(
         [
@@ -150,7 +150,7 @@ def _(attempts, detail, error, mo):
                 f'<div class="beat"><span class="n">1</span><h2>The floor</h2>'
                 f'<span class="sub">five learners · status <b>{ex.get("status", "—")}</b> · round {ex.get("round_id", "—")}</span></div>'
             ),
-            mo.Html('<div class="cards">' + "".join(cards) + "</div>"),
+            mo.Html('<div class="cards">' + "".join(_cards) + "</div>"),
             mo.md('<span class="note">Each learner begins alone. Watch where the next round starts.</span>'),
         ]
     )
@@ -161,20 +161,20 @@ def _(attempts, detail, error, mo):
 def _(detail, math, mo):
     """BEAT 2 — the gate: evidence must cross the line."""
     gates = detail.get("gates", [])
-    rows = []
+    _rows = []
     for g in gates[:6]:
-        e = math.exp(min(g.get("log_e", 0.0), 700))
-        thr = 1 / g.get("alpha", 0.05)
-        dec = g.get("decision", "pending").lower()
-        cls = "admit" if dec in {"admit", "accepted", "accept"} else ("reject" if dec in {"reject", "rejected", "quarantine"} else "pending")
-        rows.append(
-            f'<div class="round"><span class="pill {cls}">{dec}</span>'
-            f'<div class="rn" style="margin-top:8px">E {e:.2f}<span style="font-size:13px;color:var(--mut)"> / {thr:.0f}</span></div>'
+        _e = math.exp(min(g.get("log_e", 0.0), 700))
+        _thr = 1 / g.get("alpha", 0.05)
+        _dec = g.get("decision", "pending").lower()
+        _cls = "admit" if _dec in {"admit", "accepted", "accept"} else ("reject" if _dec in {"reject", "rejected", "quarantine"} else "pending")
+        _rows.append(
+            f'<div class="round"><span class="pill {_cls}">{_dec}</span>'
+            f'<div class="rn" style="margin-top:8px">E {_e:.2f}<span style="font-size:13px;color:var(--mut)"> / {_thr:.0f}</span></div>'
             f'<div class="rs">W{g.get("wins",0)} · L{g.get("losses",0)} · T{g.get("ties",0)} · controls {g.get("controls_passed","—")}</div></div>'
         )
-    body = (
-        mo.Html('<div class="rounds">' + "".join(rows) + "</div>")
-        if rows
+    _body = (
+        mo.Html('<div class="rounds">' + "".join(_rows) + "</div>")
+        if _rows
         else mo.Html('<div class="empty">No admission gates yet — a lesson appears here only after a recorded repair.</div>')
     )
     mo.vstack(
@@ -183,7 +183,7 @@ def _(detail, math, mo):
                 '<div class="beat"><span class="n">2</span><h2>The gate</h2>'
                 '<span class="sub">a lesson joins the pool only when evidence crosses the threshold</span></div>'
             ),
-            body,
+            _body,
             mo.md('<span class="note">Sequential test (α = 0.05). Peek all you want — false admissions stay bounded. Greedy loops commit 30–42% false improvements; this one commits ≈0.</span>'),
         ]
     )
@@ -194,17 +194,17 @@ def _(detail, math, mo):
 def _(attempts, detail, mo):
     """BEAT 3 — the ascent: the floor rises across rounds."""
     lessons = detail.get("lessons", [])
-    blocks = []
+    _blocks = []
     for r in range(1, 4):
-        recs = [a for a in attempts if a.get("round_id") == r]
-        firsts = [a for a in recs if a.get("submission_index") in (None, 1)]
-        succ = sum(1 for a in firsts if (a.get("result") or {}).get("success"))
-        rate = f"{succ}/{len(firsts)}" if firsts else "—"
-        props = len([l for l in lessons if l.get("origin_round") == r])
-        blocks.append(
+        _recs = [a for a in attempts if a.get("round_id") == r]
+        _firsts = [a for a in _recs if a.get("submission_index") in (None, 1)]
+        _succ = sum(1 for a in _firsts if (a.get("result") or {}).get("success"))
+        _rate = f"{_succ}/{len(_firsts)}" if _firsts else "—"
+        _props = len([l for l in lessons if l.get("origin_round") == r])
+        _blocks.append(
             f'<div class="round"><div class="rn">R{r}</div>'
-            f'<div class="rs">first-attempt success <b>{rate}</b></div>'
-            f'<div class="rs">{len(recs)} attempts · {props} lessons proposed</div></div>'
+            f'<div class="rs">first-attempt success <b>{_rate}</b></div>'
+            f'<div class="rs">{len(_recs)} attempts · {_props} lessons proposed</div></div>'
         )
     mo.vstack(
         [
@@ -212,7 +212,7 @@ def _(attempts, detail, mo):
                 '<div class="beat"><span class="n">3</span><h2>The ascent</h2>'
                 '<span class="sub">each round starts where the last round\'s best ended</span></div>'
             ),
-            mo.Html('<div class="rounds">' + "".join(blocks) + "</div>"),
+            mo.Html('<div class="rounds">' + "".join(_blocks) + "</div>"),
             mo.md('<span class="note">Harder tasks, deeper lessons. Not sharing — ascent.</span>'),
         ]
     )
@@ -237,35 +237,35 @@ def _(fetch, lessons, mo, picker, quote):
 
 @app.cell
 def _(btn, fetch, mo, picker, quote):
-    rows, note = [], None
+    _rows2, _note = [], None
     if picker.value and btn.value:
         try:
-            rep = fetch(f"/api/experiments/{quote(picker.value, safe='')}/report", timeout=20)
-            for arm, m in rep.get("arms", {}).items():
-                rows.append({"arm": arm, **{k: v for k, v in m.items() if not isinstance(v, (dict, list))}})
-            if rep.get("limitations"):
-                note = " · ".join(rep["limitations"][:2])
+            _rep = fetch(f"/api/experiments/{quote(picker.value, safe='')}/report", timeout=20)
+            for arm, m in _rep.get("arms", {}).items():
+                _rows2.append({"arm": arm, **{k: v for k, v in m.items() if not isinstance(v, (dict, list))}})
+            if _rep.get("limitations"):
+                _note = " · ".join(_rep["limitations"][:2])
         except Exception:  # noqa: BLE001
-            note = None
-    if rows:
-        out = mo.ui.table(rows, selection=None)
+            _note = None
+    if _rows2:
+        _out = mo.ui.table(_rows2, selection=None)
     else:
-        out = mo.Html('<div class="empty">Final comparison not measured yet — no_pool / curated_docs / raw_memory / admitted_pool.</div>')
-    mo.vstack([out, mo.md(f'<span class="note">{note}</span>') if note else mo.md("")])
+        _out = mo.Html('<div class="empty">Final comparison not measured yet — no_pool / curated_docs / raw_memory / admitted_pool.</div>')
+    mo.vstack([_out, mo.md(f'<span class="note">{_note}</span>') if _note else mo.md("")])
     return
 
 
 @app.cell
 def _(detail, mo):
     """BEAT 5 — receipts: negative controls + Weave links."""
-    nc = detail.get("negative_controls", [])
-    wl = detail.get("weave_links", [])
-    rejected = [c for c in nc if c.get("rejected") or c.get("decision") in {"reject", "quarantine"}]
-    pills = "".join(
-        f'<span class="pill reject">false lesson rejected</span> ' for _ in (rejected[:4] or [])
+    _nc = detail.get("negative_controls", [])
+    _wl = detail.get("weave_links", [])
+    _rejected = [c for c in _nc if c.get("rejected") or c.get("decision") in {"reject", "quarantine"}]
+    _pills = "".join(
+        f'<span class="pill reject">false lesson rejected</span> ' for _ in (_rejected[:4] or [])
     ) or '<span class="pill pending">controls pending</span>'
-    links = "".join(
-        f'<div class="kv">↗ {w.get("label") or w.get("url") or w}</div>' for w in wl[:4]
+    _links = "".join(
+        f'<div class="kv">↗ {w.get("label") or w.get("url") or w}</div>' for w in _wl[:4]
     )
     mo.vstack(
         [
@@ -273,8 +273,8 @@ def _(detail, mo):
                 '<div class="beat"><span class="n">5</span><h2>Receipts</h2>'
                 '<span class="sub">the loop defends itself — and the evidence is public</span></div>'
             ),
-            mo.Html(f"<div>{pills}</div>"),
-            mo.Html(f'<div style="margin-top:8px">{links}</div>') if links else mo.md('<span class="note">Weave: wandb.ai/yahya-dojo-hacks/dojo/weave</span>'),
+            mo.Html(f"<div>{_pills}</div>"),
+            mo.Html(f'<div style="margin-top:8px">{_links}</div>') if _links else mo.md('<span class="note">Weave: wandb.ai/yahya-dojo-hacks/dojo/weave</span>'),
         ]
     )
     return
