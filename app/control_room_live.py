@@ -100,7 +100,7 @@ def _(experiments, mo):
 @app.cell
 def _(fetch, picker, quote, tick):
     tick.value  # subscribe
-    detail, gates, pairs, report, attempts, err = {}, [], [], None, [], None
+    detail, gates, pairs, report, attempts, load_err = {}, [], [], None, [], None
     if picker.value:
         try:
             detail = fetch(f"/api/experiments/{quote(picker.value, safe='')}")
@@ -112,8 +112,8 @@ def _(fetch, picker, quote, tick):
             except Exception:  # noqa: BLE001 — report not ready yet
                 report = None
         except Exception as _e:  # noqa: BLE001
-            err = f"{type(_e).__name__}"
-    return attempts, detail, err, gates, pairs, report
+            load_err = f"{type(_e).__name__}"
+    return attempts, detail, gates, pairs, report
 
 
 @app.cell
