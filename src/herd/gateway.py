@@ -40,6 +40,7 @@ class GatewayConfig:
     pricing_source: str = "https://site.wandb.ai/pricing/tokens/"
     pricing_verified_at: str = "2026-09-13"
     timeout_seconds: float = 65
+    reasoning_mode: str = "off"
 
     def __post_init__(self):
         numbers = (self.input_per_million, self.output_per_million, self.cap_usd, self.timeout_seconds)
@@ -47,6 +48,8 @@ class GatewayConfig:
             raise ValueError("Pricing, cap and timeout must be finite and positive")
         if urlparse(self.base_url).scheme != "https":
             raise ValueError("Provider URL must use HTTPS")
+        if self.reasoning_mode not in {"off", "low", "medium", "high"}:
+            raise ValueError("HERD_REASONING_MODE must be off, low, medium, or high")
 
     @classmethod
     def from_env(cls):
@@ -75,6 +78,7 @@ class GatewayConfig:
             cap_usd=float(os.getenv("HERD_DOLLAR_CAP", "25")),
             pricing_source=os.getenv("HERD_PRICING_SOURCE", cls.pricing_source),
             pricing_verified_at=os.getenv("HERD_PRICING_VERIFIED_AT", cls.pricing_verified_at),
+            reasoning_mode=os.getenv("HERD_REASONING_MODE", "off").lower(),
         )
 
     def public_dict(self):
@@ -82,7 +86,14 @@ class GatewayConfig:
 
     @property
     def config_hash(self):
-        return digest({"model": self.model, "base_url": self.base_url, "temperature": 0.2})
+        return digest(
+            {
+                "model": self.model,
+                "base_url": self.base_url,
+                "temperature": 0.2,
+                "reasoning_mode": self.reasoning_mode,
+            }
+        )
 
 
 class BudgetLedger:
@@ -318,16 +329,21 @@ class ProviderGateway:
             async with httpx.AsyncClient(
                 timeout=self.config.timeout_seconds, transport=self.transport, follow_redirects=False
             ) as client:
+                body = {
+                    "model": self.config.model,
+                    "messages": messages,
+                    "max_tokens": max_output_tokens,
+                    "temperature": 0.2,
+                    "stream": False,
+                }
+                if self.config.reasoning_mode == "off":
+                    body["chat_template_kwargs"] = {"enable_thinking": False}
+                else:
+                    body["reasoning_effort"] = self.config.reasoning_mode
                 response = await client.post(
                     self.config.base_url.rstrip("/") + "/chat/completions",
                     headers=headers,
-                    json={
-                        "model": self.config.model,
-                        "messages": messages,
-                        "max_tokens": max_output_tokens,
-                        "temperature": 0.2,
-                        "stream": False,
-                    },
+                    json=body,
                 )
             if response.status_code != 200:
                 raise GatewayError(f"Provider HTTP {response.status_code}; reservation retained")

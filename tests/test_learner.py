@@ -3,7 +3,7 @@ import json
 import pytest
 
 from herd.gateway import Completion
-from herd.learner import Learner
+from herd.learner import Learner, worker_feedback
 from herd.schemas import BehaviorResult, CheckResult, Partition, TaskManifest
 
 
@@ -44,6 +44,20 @@ class FixtureEvaluator:
                 )
             ],
         )
+
+
+def test_worker_feedback_exposes_only_public_diagnostics():
+    result = BehaviorResult(
+        task_id="task",
+        success=False,
+        checks=[
+            CheckResult(name="notebook_execution", passed=False, detail="NameError: mo is not defined"),
+            CheckResult(name="semantic_probe", passed=False, detail="hidden expected value 99999"),
+        ],
+    )
+    feedback = worker_feedback(result)
+    assert feedback["checks"][0]["detail"] == "NameError: mo is not defined"
+    assert "detail" not in feedback["checks"][1]
 
 
 def task():

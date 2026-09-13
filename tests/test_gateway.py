@@ -34,6 +34,12 @@ async def test_usage_settlement_and_no_secret_error(tmp_path):
 
     def response(request):
         assert request.headers["Authorization"] == "Bearer secret-value"
+        assert request.content
+        import json
+
+        body = json.loads(request.content)
+        assert body["chat_template_kwargs"] == {"enable_thinking": False}
+        assert "reasoning_effort" not in body
         return httpx.Response(
             200,
             json={
@@ -50,6 +56,30 @@ async def test_usage_settlement_and_no_secret_error(tmp_path):
     with pytest.raises(GatewayError, match="different inputs"):
         await gateway.complete([], 10, "one")
     assert "secret-value" not in repr(gateway.config)
+
+
+@pytest.mark.asyncio
+async def test_gateway_can_request_low_reasoning(tmp_path):
+    def response(request):
+        import json
+
+        body = json.loads(request.content)
+        assert body["reasoning_effort"] == "low"
+        assert "chat_template_kwargs" not in body
+        return httpx.Response(
+            200,
+            json={
+                "choices": [{"message": {"content": "hello"}}],
+                "usage": {"prompt_tokens": 4, "completion_tokens": 2},
+            },
+        )
+
+    gateway = ProviderGateway(
+        GatewayConfig(api_key="secret", reasoning_mode="low"),
+        BudgetLedger(tmp_path / "money.db", 1),
+        httpx.MockTransport(response),
+    )
+    assert (await gateway.complete([], 10, "low")).content == "hello"
 
 
 @pytest.mark.asyncio
