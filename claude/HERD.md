@@ -169,7 +169,6 @@ Listed in dependency order; each is a line in the build plan's demo work package
 | W&B Inference | Model adapter for learner and distillation calls when compatible models and credits are available. Actual access and model IDs must be recorded. |
 | ARIA | Analyzes real run summaries, explains failure concentrations, and proposes next-round development emphasis within frozen evaluation boundaries. Its analysis is stored and connected to a resulting experiment or curriculum decision. |
 | molab | Hosted access to the control room or notebooks after persistence and package support are checked. |
-| TypeSafe AI | Provider adapter and possible fixed-model replication when the onsite interface is confirmed; not a fabricated pre-integrated service. |
 
 ARIA remains a full integration workstream, but its account availability must be represented honestly. The current automation documentation verifies monitor-triggered actions such as webhooks; it does not by itself verify a callable ARIA API. See the architecture's integration contract.
 

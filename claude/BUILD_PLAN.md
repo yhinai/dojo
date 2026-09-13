@@ -135,7 +135,7 @@ Record execution events locally, then upload to Weave through an idempotent outb
 
 ARIA must analyze actual experiment summaries. Capture its report and connect it to a real development-only curriculum decision. If the required automated trigger is not available, implement the supported interface with honest manual initiation and label it as such. Do not claim a nonexistent API or fabricate an analysis.
 
-TypeSafe and alternative provider support should use the same gateway interface. A model-family replication is a new run with its own model binding; it is not mixed into the primary worker comparison.
+Alternative provider support should use the same gateway interface. A model-family replication is a new run with its own model binding; it is not mixed into the primary worker comparison.
 
 ## 12. Interface work package
 

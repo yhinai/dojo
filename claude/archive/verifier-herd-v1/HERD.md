@@ -269,7 +269,6 @@ And the second question — ***"is the agent self-correcting, or just the grader
 | **marimo** | The **control room** — and it must be *reactive*, not a static chart. A slider on the promotion threshold α that live-recomputes which defenses survive and redraws the immunity curve. | `mo.ui.refresh(default_interval="2s")` re-runs every downstream cell. A static two-curve chart is a matplotlib figure; the DevRel judge wants reactivity. |
 | **ARIA** | The colony's **epidemiologist**. Immunity drops below threshold → W&B Automation → **Trigger ARIA** → it investigates the breach and writes the incident report. | This is ARIA's *only* real programmatic hook. There is no public API/SDK — it's a chat feature plus one Automation action. Used exactly as designed. ⚠️ Requires "Smart features" enabled, **team** project, Multi-tenant Cloud. **Verify on site before depending on it.** |
 | **W&B Inference** | What makes a colony affordable. OpenAI-compatible at `https://api.inference.wandb.ai/v1`, GPT-OSS-20B ~$0.05/1M in. | And it's the *correct* architecture, not a budget compromise: **diverse cheap monitors beat identical expensive ones by 2.4×** ([`2605.15377`](https://arxiv.org/abs/2605.15377)). A large cheap colony is what the research says to build. |
-| **TypeSafe AI** | Typed decisions for gate outcomes. | Stealth lab, **no public API**. Do not pre-build. Get access on site, wrap whatever they hand out, budget 1–2h. Sasha Sheng judges this track. |
 
 Five prize categories from one system, none of them stretched.
 

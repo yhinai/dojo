@@ -48,7 +48,7 @@ uv run herd validate-fixtures
 python3 claude/verify_architecture.py
 ```
 
-`herd sponsor-baseline` is the live sponsor check. It authenticates W&B, initializes Weave, validates the configured inference model with a minimal completion, and checks marimo. TypeSafe is checked through the same OpenAI-compatible contract once its sponsor-issued endpoint, model, and key are configured. ARIA and molab are reported as UI-verified integrations because neither supplies a separate API key.
+`herd sponsor-baseline` is the live sponsor check. It authenticates W&B, initializes Weave, validates the configured inference model with a minimal completion, and checks marimo. ARIA and molab are reported as UI-verified integrations because neither supplies a separate API key.
 
 Fixture validation runs real marimo reference and deliberately broken notebooks, but accepts only the exact registered fixtures outside Docker. It is not a learning experiment. `--browser` adds real browser interaction verification and requires installed Playwright Chromium.
 
@@ -71,7 +71,7 @@ uv run herd aria-export EXPERIMENT_ID
 uv run herd aria-import PATH_TO_BUNDLE PATH_TO_REPORT HTTPS_ARIA_URL OPERATOR CURRICULUM_ACTION
 ```
 
-Weave uploads durable evidence, reconstructs native evaluations from recorded oracle outcomes, and publishes a real leaderboard reference when configured. Recorded evaluation replay is labeled distinctly from source worker execution. ARIA uses an operator-attested report from the genuine W&B interface; no undocumented API or fabricated report is used. The molab packaging workflow and provider-neutral TypeSafe-compatible contract are implemented; actual hosted/provider validation requires sponsor access and documented compatibility.
+Weave uploads durable evidence, reconstructs native evaluations from recorded oracle outcomes, and publishes a real leaderboard reference when configured. Recorded evaluation replay is labeled distinctly from source worker execution. ARIA uses an operator-attested report from the genuine W&B interface; no undocumented API or fabricated report is used. The molab packaging workflow and provider-neutral inference contract are implemented; actual hosted/provider validation requires sponsor access and documented compatibility.
 
 ## Design and build documentation
 
@@ -110,7 +110,7 @@ Reconciliation alone does not authorize another model call. You can later repeat
 
 The service and `herd run` continuously sweep durable records into the Weave outbox and retry authentic uploads when configured. `sync-weave` remains an explicit recovery command. Native evaluations are recorded oracle replays, not repeated model executions. Fixture experiments are excluded from remote measured evidence.
 
-For TypeSafe or another provider, supply its documented HTTPS OpenAI-compatible endpoint, model ID and verified token prices, set `HERD_PROVIDER_NAME`, and run `herd provider-check`. No proprietary endpoint is guessed. A provider with a different wire protocol needs a documented adapter before it can be claimed as supported. Changing providers starts a separately bound experiment.
+For another provider, supply its documented HTTPS OpenAI-compatible endpoint, model ID and verified token prices, set `HERD_PROVIDER_NAME`, and run `herd provider-check`. No proprietary endpoint is guessed. A provider with a different wire protocol needs a documented adapter before it can be claimed as supported. Changing providers starts a separately bound experiment.
 
 [Deployment instructions](deploy/README.md) include Linux services, authenticated Caddy proxy, secret files, backup/restore, health monitoring and a molab control-room package. Build that package with `uv run python scripts/package_molab.py /new/output/directory`. Public hosting, actual sponsor account validation, live experiment results and recordings still require execution and access.
 

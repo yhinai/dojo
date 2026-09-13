@@ -404,7 +404,6 @@ Process isolation: colony runner, Trial Runner, and Auditor are **separate OS pr
 | **ControlArena** | `pip install control-arena`; settings `apps`/`bash`/`bigcodebench`; `attack_policy_builder` / `honest_policy_builder`; `basic_monitor_builder`; `compute_safety` / `compute_usefulness`; `control-arena trajectory export` | optional second task source + the safety/usefulness metric pair |
 | **harden-v0** | `harden/loop.py` state machine, `harden/pool.py` git daemon + `PoolCursor`, `harden/instructions.py` role prompts, `_run_targeted_replay` | the per-cell loop and pool transport — reused, not rewritten |
 | **terminal-wrench** | `index/trajectories.json`, `tasks/*/original_task`, `prompts/{hack_prompt_v5.md, sanitize_prompt.txt, monitor_judge_v1.txt}`, the 11 categories | tasks, exploits, labeled detector data, baseline judge |
-| **TypeSafe AI** | unknown until on site | typed gate decisions, if an API is handed out |
 
 ---
 
@@ -466,7 +465,6 @@ Each architectural assumption below was checked against the documentation and pa
 | Diverse cheap monitors beat identical ones; naive diversity selection backfires | pAUC 0.8160 vs 0.7621; diversity-only 0.717 < random 0.769 | ✔ → §2.7 prune-then-diversify |
 | 1–10 integer scores beat binary for monitors | pAUROC 0.905 vs 0.269 | ✔ → §2.7 |
 | A single reference solution suffices for non-interference | No — KernelBench: oracle never exercised `load_inline`; two over-restrictive defenses slipped through | ✖ → §2.1 requires ≥2 diverse solutions |
-| TypeSafe AI has a public API to pre-integrate | No | ⚠ → §6 defers to on-site |
 | The cross-verifier proof can use the same exploit that produced the patch | No — circular | ✖ → §4.3 re-derives from a held-out family on a different verifier |
 
 ### 9.2 Structural checks (mechanised)

@@ -108,13 +108,6 @@ def sponsor_baseline(*, publish_weave: bool = False) -> dict:
         project,
     )
 
-    typesafe_key = os.getenv("TYPESAFE_API_KEY", "")
-    checks["typesafe"] = _openai_provider(
-        os.getenv("TYPESAFE_BASE_URL", ""), typesafe_key, os.getenv("TYPESAFE_MODEL", "")
-    )
-    if checks["typesafe"]["status"] == "pending":
-        checks["typesafe"]["detail"] = "manual sponsor invitation/API provisioning is still required"
-
     command = [str(ROOT / ".venv/bin/marimo"), "check", str(ROOT / "app/control_room.py")]
     if not Path(command[0]).exists():
         command[0] = "marimo"

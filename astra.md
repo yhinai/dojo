@@ -526,7 +526,7 @@ Current documentation describes team-project and Smart-feature requirements. Ver
 
 ### Other sponsor capabilities
 
-W&B Inference may serve worker or proposal models if suitable access exists. TypeSafe AI can be an optional comparison model after its onsite interface is verified. Neither is essential to this architecture. Report actual model IDs and configuration, and do not assume that sponsor credits cover Sonnet or Opus.
+W&B Inference may serve worker or proposal models if suitable access exists. Report actual model IDs and configuration, and do not assume that sponsor credits cover Sonnet or Opus.
 
 ## 13. Interface and demonstration design
 

@@ -54,12 +54,10 @@ def provider_capabilities():
             "usage.prompt_tokens",
             "usage.completion_tokens",
         ],
-        "typesafe": {
-            "status": "operator_configured_adapter"
-            if provider.lower() == "typesafe"
-            else "available_through_verified_compatible_provider",
-            "requirement": "Supply the sponsor-documented HTTPS endpoint, model and token pricing; "
-            "run provider-check before creating an experiment.",
+        "alternative_provider": {
+            "status": "operator_configured_adapter",
+            "requirement": "Supply a documented HTTPS endpoint, model and token pricing; run "
+            "provider-check before creating an experiment.",
         },
         "molab": {
             "status": "deployment_bundle_available",

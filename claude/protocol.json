@@ -93,8 +93,7 @@
     "marimo_control_room": "required_not_yet_implemented",
     "aria_analysis": "required_access_and_interface_to_verify",
     "inference_adapter": "required_provider_to_verify",
-    "molab_hosting": "deployment_access_to_verify",
-    "typesafe_adapter": "onsite_interface_to_verify"
+    "molab_hosting": "deployment_access_to_verify"
   },
   "oracle": {
     "primary": "headless_programmatic",
