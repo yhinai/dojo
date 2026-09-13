@@ -381,6 +381,55 @@ class TaskRegistry:
             probe["state_value"] = probe["value"] + 1
         return probes
 
+    def harness_requirements(self, task: TaskManifest, source: str) -> list[tuple[str, bool]]:
+        """Host-side proof that the submission is a marimo notebook at all.
+
+        Parsed from the submitted source on the host, so it cannot be forged by anything
+        the sandbox writes. A submission that computes the right answers in plain Python
+        and reports them is rejected here, before any behavioural comparison.
+        """
+        tree = ast.parse(source)
+        imports_marimo = any(
+            (isinstance(n, ast.Import) and any(a.name == "marimo" for a in n.names))
+            or (isinstance(n, ast.ImportFrom) and (n.module or "").split(".")[0] == "marimo")
+            for n in ast.walk(tree)
+        )
+        builds_app = any(
+            isinstance(n, ast.Call)
+            and isinstance(n.func, ast.Attribute)
+            and n.func.attr == "App"
+            for n in ast.walk(tree)
+        )
+        cells = [
+            n
+            for n in ast.walk(tree)
+            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and any(
+                isinstance(d, ast.Attribute) and d.attr == "cell"
+                for d in (x.func if isinstance(x, ast.Call) else x for x in n.decorator_list)
+            )
+        ]
+        widgets = {
+            n.func.attr
+            for n in ast.walk(tree)
+            if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+        }
+        kind = CONTRACTS[self.family(task).name]
+        needed = {
+            "form": {"slider", "form"},
+            "table": {"slider", "table"},
+            "multi_checkbox": {"slider", "checkbox"},
+            "multi_offset": {"slider"},
+            "stop": {"slider", "checkbox", "stop"},
+            "state": {"slider", "state"},
+        }.get(kind, {"slider"})
+        return [
+            ("harness_imports_marimo", imports_marimo),
+            ("harness_builds_app", builds_app),
+            ("harness_declares_cells", len(cells) >= 4),
+            ("harness_constructs_widgets", needed <= widgets),
+        ]
+
     def structure_requirements(self, task: TaskManifest, source: str) -> list[tuple[str, bool]]:
         """Only enforce structures explicitly requested in this public task, without cell-name matching."""
         cells: dict[str, set[int]] = {}

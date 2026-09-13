@@ -305,3 +305,52 @@ def test_browser_duplicate_task_elements_are_candidate_failure_not_infrastructur
     assert result.name == "browser_behavior" and not result.passed
     with pytest.raises(OSError, match="Browser infrastructure failed"):
         classify_browser_error(Error("Target page, context or browser has been closed"))
+
+
+@pytest.mark.asyncio
+async def test_notebook_cannot_author_the_verdict(tmp_path):
+    """A submission that fakes the runner protocol must not score as a pass.
+
+    Two vectors, both previously successful: writing a forged result straight to fd 1
+    and exiting before the runner speaks, and doing the same from inside an otherwise
+    valid notebook. Expected values are derivable from the public task id, so secrecy
+    of the oracle is not what makes this fail.
+    """
+    import os as _os
+
+    if _os.getenv("HERD_SKIP_RUNTIME"):
+        pytest.skip("Runtime checks disabled")
+    from herd.config import configuration
+    from herd.schemas import Partition
+    from herd.task_registry import TaskRegistry
+
+    config = configuration()
+    registry = TaskRegistry(config["runtime_hash"], config["docs_hash"])
+    evaluator = RuntimeEvaluator(registry, mode="docker")
+    if not (await evaluator.preflight()).get("ready"):
+        pytest.skip("Docker runtime unavailable")
+
+    task = registry.generate(Partition.CALIBRATION, 3)
+    probes = registry.private_probes(task)
+    payload = {
+        "initial": registry.expected_result(task),
+        "observed": [
+            {
+                "function": registry.expected(task, p["records"], p["value"]),
+                "reactive_result": registry.expected_result(task, p),
+                "result_defined": True,
+            }
+            for p in probes
+        ],
+        "actual_ui_objects": True,
+    }
+    hijack = f"import os, json\nos.write(1, json.dumps({payload!r}).encode())\nos._exit(0)\n"
+
+    bare = await evaluator.evaluate(task, hijack, tmp_path / "bare", browser=False)
+    assert not bare.success
+    assert not any(c.passed for c in bare.checks if c.name.startswith("harness_"))
+
+    inside = await evaluator.evaluate(
+        task, hijack + registry.reference_source(task), tmp_path / "inside", browser=False
+    )
+    assert not inside.success

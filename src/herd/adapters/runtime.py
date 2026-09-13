@@ -4,6 +4,7 @@ import ast
 import asyncio
 import json
 import os
+import secrets
 import shutil
 import sys
 import time
@@ -215,6 +216,11 @@ class RuntimeEvaluator:
                 ]
             )
             return result
+        harness = getattr(self.registry, "harness_requirements", None)
+        for name, passed in (harness(task, source) if harness else []):
+            result.checks.append(
+                CheckResult(name=name, passed=passed, detail="Host-parsed harness contract")
+            )
         for name, passed in self.registry.structure_requirements(task, source):
             result.checks.append(
                 CheckResult(name=name, passed=passed, detail="Publicly requested cell structure")
@@ -234,6 +240,9 @@ class RuntimeEvaluator:
             else [sys.executable, str(Path(__file__).with_name("runner.py")), str(notebook.resolve())]
         )
         probes = self.registry.private_probes(task)
+        # The notebook must not be able to author the verdict: the runner echoes this
+        # host-generated nonce, so a response it did not produce is rejected below.
+        nonce = secrets.token_hex(16)
         env = {
             "PATH": os.environ.get("PATH", ""),
             "HOME": os.path.expanduser("~") if self.mode == "docker" else str(sandbox.resolve()),
@@ -251,7 +260,8 @@ class RuntimeEvaluator:
             )
             try:
                 stdout, stderr = await asyncio.wait_for(
-                    self._communicate(process, json.dumps(probes).encode()), self.timeout_seconds
+                    self._communicate(process, json.dumps({"nonce": nonce, "probes": probes}).encode()),
+                    self.timeout_seconds,
                 )
             except (TimeoutError, ValueError) as exc:
                 process.kill()
@@ -295,6 +305,16 @@ class RuntimeEvaluator:
             if not isinstance(observed, dict):
                 result.checks.append(
                     CheckResult(name="runner_protocol", passed=False, detail="Runner returned a non-object")
+                )
+                return result
+            if observed.get("nonce") != nonce:
+                result.checks.append(
+                    CheckResult(
+                        name="runner_protocol",
+                        passed=False,
+                        detail="Result was not framed by the host nonce; the notebook may have "
+                        "written the protocol channel itself",
+                    )
                 )
                 return result
             if "candidate_error" in observed:
