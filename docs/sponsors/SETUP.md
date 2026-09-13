@@ -16,8 +16,8 @@ Verified September 13, 2026 using Chrome and the live provider APIs. Account: ya
 | W&B Inference | Working: authenticated listing returned 28 models and a minimal DeepSeek completion returned visible content | Confirm the advertised $100 quota in billing |
 | TypeSafe AI | Credit form submitted; Google sign-in completed; public waitlist joined | Console remains invite-only; a TypeSafe representative must provision model/API access |
 | Weave | Current Free plan includes 1 GB monthly ingestion | API credential authenticates; real trace verified in `yahya-dojo-hacks/dojo` |
-| marimo / molab | Handbook advertises free cloud GPUs | Working: a hosted sandbox ran `nvidia-smi` on an RTX PRO 6000 Blackwell Server Edition with 97,887 MiB |
-| ARIA | W&B in-app research assistant; no separate credit grant/API key listed | Working in private project `yahya-dojo-hacks/dojo` |
+| marimo / molab | Handbook advertises free cloud GPUs | Working: a fresh hosted sandbox reconnected with 4 CPU / 32 GiB / RTX PRO 6000 and displayed `NVIDIA RTX PRO 6000 Blackwell Server Edition, 97887 MiB` from `nvidia-smi` |
+| ARIA | W&B in-app research assistant; no separate credit grant/API key listed | Working: opened ARIA for private project `yahya-dojo-hacks/dojo` and completed a project activity summary query |
 | W&B Training | Billing shows $500 allowance | Observed allowance only; training availability not tested |
 | Fully Connected | Conditional conference-ticket opportunity | Ask CoreWeave staff for attendee qualification criteria; not an automatic credit |
 
@@ -42,7 +42,7 @@ uv run herd sponsor-baseline --publish-weave
 
 The command authenticates W&B, initializes and optionally publishes a real Weave object, lists the configured provider's models, makes a minimal completion, checks the local marimo control room, and reports the UI/manual boundaries for ARIA and molab. It checks TypeSafe automatically once `TYPESAFE_API_KEY`, `TYPESAFE_BASE_URL`, and `TYPESAFE_MODEL` are provisioned. It never prints credential values or model output.
 
-Latest evidence: W&B authentication passed; Weave published `weave:///yahya-dojo-hacks/dojo/object/herd-sponsor-baseline:VGWnwGG36405n5fo1D0VfraX8LMv8dTcmXqihGYBbXc`; W&B Inference listed 28 models and returned visible content from a minimal completion; marimo validation passed; molab executed on the configured Blackwell GPU; and ARIA opened for the `dojo` project.
+Latest evidence: W&B authentication passed; Weave published `weave:///yahya-dojo-hacks/dojo/object/herd-sponsor-baseline:VGWnwGG36405n5fo1D0VfraX8LMv8dTcmXqihGYBbXc`; W&B Inference listed 28 models and returned visible content from a minimal completion; marimo validation passed; a fresh molab session reconnected and executed on the configured Blackwell GPU; and ARIA completed a project activity summary query for `dojo`.
 
 Installed global `wandb` 0.30.0, `marimo` 0.24.2, and official `wandb_mcp_server` 0.3.7.
 W&B MCP source commit: `53b199a5f4af29aa82077e2c7f1e2c5e5e0c2ca0`.
