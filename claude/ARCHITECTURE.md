@@ -309,7 +309,7 @@ Freeze the lesson package and current pool before drawing tasks. For each pair:
 
 Do not force-retrieve the candidate only in trials if normal retrieval would omit it. The tested treatment includes the real retrieval policy. Ties from nonretrieval are part of its effectiveness.
 
-The admission stream draws from the candidate's frozen applicability distribution. Claims are scoped to that distribution. Separate fixed clean controls check broader non-interference. The final comparison measures the whole pool across the registered domain.
+The admission stream draws from the candidate's frozen applicability distribution: every pair is a fresh task whose public skill tags carry the candidate's whole tag set, rotated across the families that share those tags so a two-family scope is not evidenced entirely by one of them. Each (slot, pair index) owns a disjoint seed window, so a resumed trial redraws exactly the pairs it already holds. Drawing uniformly across all twelve families instead would leave a contract-scoped lesson about five on-scope pairs inside a 64-pair budget against a threshold needing eight wins, making admission unreachable for any lesson however strong. Claims are scoped to that distribution. Separate fixed clean controls check broader non-interference. The final comparison measures the whole pool across the registered domain.
 
 There are at most 64 fresh task pairs per candidate. The executed gate is per-candidate (α = 0.05, threshold 20); the 15-way familywise bound (threshold 300) is documented and reported alongside, not executed — at that threshold a +20-point lesson is admitted ~16% of the time within 64 pairs, which would leave the pool empty at demo time. See [GENERALITY.md](GENERALITY.md) for evidence updates, familywise allocation, negative controls, and insufficient-evidence behavior.
 
@@ -362,7 +362,7 @@ The reference final plan uses 60 tasks across 12 held-out template families, fou
 |---|---|
 | No pool | None; normal public docs tool remains available. |
 | Curated docs | A fixed human-authored quick-reference derived from the same public docs, **authored, frozen, and hashed before round one begins** (`baselines.curated_docs_hash`). Authoring it after observing development failures would contaminate the baseline with the very experience the pool is being compared against. The raw-memory selection rule is likewise hashed before round one. |
-| Raw memory | Deterministically selected development experience excerpts, truncated to the same memory budget, with no admission filtering. |
+| Raw memory | The first verified repair per learner per round, in chronological order, tag-filtered and truncated to the same memory budget, with no admission filtering. Rendered through the **same public envelope** as the admitted pool (`id`, `when`, `instruction`, `except`, `example`) from one shared function, so the two arms differ by gating alone rather than by how a surviving lesson is written down (`baselines.raw_memory_selection_rule_hash`). |
 | Admitted pool | The final versioned pool through the frozen retriever. |
 
 The raw-memory selection rule is specified before comparison. It cannot be manually cherry-picked after seeing results. No arm receives final answers or the repaired source notebook for its final task.

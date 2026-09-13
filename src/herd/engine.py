@@ -9,7 +9,16 @@ from pathlib import Path
 from uuid import uuid4
 
 from herd.config import ROOT, configuration
-from herd.curator import RETRIEVER_HASH, curate, make_pool, retrieve, review_draft, semantic_review, tokens
+from herd.curator import (
+    RETRIEVER_HASH,
+    curate,
+    make_pool,
+    public_envelope,
+    raw_memory,
+    retrieve,
+    review_draft,
+    semantic_review,
+)
 from herd.curriculum import assigned_track, freeze_round
 from herd.gateway import GatewayError, GlobalBudgetExceeded
 from herd.integrations.weave import traced
@@ -18,6 +27,7 @@ from herd.pace import update_gate
 from herd.schemas import (
     AttemptRecord,
     GateState,
+    LessonDraft,
     LessonRevision,
     LessonStatus,
     PairOutcome,
@@ -55,6 +65,13 @@ async def safe_gather(*coroutines):
             task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
         raise
+
+
+# Seeds examined per admission draw before the candidate scope is declared empty, and the
+# offset that keeps negative-control draws in a seed space disjoint from the primary trials.
+ADMISSION_SCAN = 200
+ADMISSION_VARIETY = 12
+ADMISSION_DIAGNOSTIC_BASE = 1_000_000_000
 
 
 class Engine:
@@ -334,6 +351,54 @@ class Engine:
                 return False
         return True
 
+    def admission_task(self, eid, state, candidate, slot, index, diagnostic):
+        """Draw a fresh admission task from the candidate's own applicability scope.
+
+        GENERALITY 12 binds the trial to the candidate's frozen applicability
+        distribution. Drawing uniformly across every family instead left a
+        contract-scoped lesson roughly five on-scope pairs inside a 64-pair
+        budget, which caps the e-value near 11 against a threshold of 20: no
+        lesson could be admitted however strong it was. Prefer a task carrying
+        the candidate's whole tag set; fall back to the tag overlap retrieval
+        itself requires, so a narrower adapter still yields a legal draw.
+
+        Each (slot, index) owns a disjoint seed window, so the sequence is a
+        pure function of the trial position and replays identically on resume.
+        """
+        scope = set(candidate.scope_tags)
+        base = (ADMISSION_DIAGNOSTIC_BASE if diagnostic else 0) + (slot * 1000 + index) * ADMISSION_SCAN
+        drawn = set(state.task_ids) | set(candidate.origin_task_ids)
+        matches, overlaps, fresh = [], [], []
+        for offset in range(ADMISSION_SCAN):
+            task = self.registry.generate(Partition.ADMISSION, base + offset)
+            if task.task_id in drawn:
+                continue
+            tags = set(task.public_skill_tags)
+            if scope <= tags:
+                matches.append(task)
+                if len(matches) >= ADMISSION_VARIETY:
+                    break
+            elif scope & tags and len(overlaps) < ADMISSION_VARIETY:
+                overlaps.append(task)
+            elif len(fresh) < ADMISSION_VARIETY:
+                fresh.append(task)
+        pool = matches or overlaps or fresh
+        if not pool:
+            raise ValueError("Admission sampler exhausted its seed window without a fresh task")
+        if not matches:
+            # An adapter whose tasks do not carry the candidate scope widens the draw. Record
+            # it: the trial then tests a broader claim than the candidate scope states.
+            self.store.event(
+                eid,
+                "control.admission_scope_widened",
+                {"slot": slot, "index": index, "scope": sorted(scope), "basis": "overlap" if overlaps else "any"},
+            )
+        # Rotate across the scoped families rather than always taking the first hit, so a
+        # scope covering two families is not evidenced entirely by one of them.
+        task = pool[index % len(pool)]
+        self.store.put(eid, "task", task.task_id, task)
+        return task
+
     @traced("decide_admission")
     async def gate(self, eid, round_id, pool, candidate, slot, diagnostic=False):
         binding = TrialBinding(
@@ -345,10 +410,11 @@ class Engine:
             docs_snapshot_hash=self.config["docs_hash"],
             sampler_hash=digest(
                 [
-                    "admission-v2",
+                    "admission-v3-scoped",
                     slot,
                     "diagnostic" if diagnostic else "primary",
                     sorted(candidate.origin_task_ids),
+                    sorted(candidate.scope_tags),
                 ]
             ),
         )
@@ -376,8 +442,7 @@ class Engine:
         while state.decision == "evaluating":
             index = len(state.pair_ids)
             self.checkpoint(eid)
-            seed = (1000000 if diagnostic else 0) + slot * 1000 + index
-            task = self.task(eid, Partition.ADMISSION, seed)
+            task = self.admission_task(eid, state, candidate, slot, index, diagnostic)
             if task.task_id in candidate.origin_task_ids or task.partition != Partition.ADMISSION:
                 raise ValueError("Sampler violated development/admission separation")
             if task.task_id in state.task_ids:
@@ -759,16 +824,18 @@ class Engine:
         exp = self.store.get(eid, "experiment", eid)
         exp["phase"] = "final"
         self.store.put(eid, "experiment", eid, exp)
-        raw = []
-        for slot in sorted(
-            self.store.list(eid, "raw_slot"), key=lambda x: (x["round_id"], x["learner_index"])
-        ):
-            c = slot["draft"]
-            raw.append({"instruction": c["instruction"], "scope_tags": c["scope_tags"]})
+        raw = [
+            LessonDraft.model_validate(slot["draft"])
+            for slot in sorted(
+                self.store.list(eid, "raw_slot"), key=lambda x: (x["round_id"], x["learner_index"])
+            )
+        ]
         frozen = {
             "pool_hash": pool.pool_hash,
             "curated_docs_hash": digest(exp["config"]["curated_docs"]),
-            "raw_memory_hash": digest(raw),
+            "raw_memory_hash": digest(
+                [{"public": public_envelope(d), "scope_tags": d.scope_tags} for d in raw]
+            ),
             "model_hash": self.model_hash,
             "retriever_hash": RETRIEVER_HASH,
             "tasks_hash": digest(
@@ -787,13 +854,7 @@ class Engine:
         for n in range(60):
             task = self.task(eid, Partition.FINAL, 100000 + n)
             families[task.task_id] = task.family_id
-            selected = []
-            for c in raw:
-                if (
-                    set(c["scope_tags"]) & set(task.public_skill_tags)
-                    and tokens(json.dumps(selected + [c])) <= 2000
-                ):
-                    selected.append(c)
+            selected = raw_memory(raw, task.public_skill_tags)
             for repeat in range(3):
                 for arm in ("no_pool", "curated_docs", "raw_memory", "admitted_pool"):
                     memory = {

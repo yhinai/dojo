@@ -598,3 +598,140 @@ async def test_cached_pair_does_not_emit_new_live_evaluation(tmp_path, monkeypat
         await engine.evaluate_pair("e", task, "pair", 1, engine.pool("e"), None)
     assert len(calls) == 1
     assert len(engine.store.list("e", "live_evaluation")) == 1
+
+
+def scoped_candidate(registry, seed=5):
+    from herd.schemas import LessonDraft
+
+    origin = registry.generate(Partition.DEVELOPMENT, seed)
+    draft = LessonDraft(
+        lesson_id="lesson-scoped",
+        runtime_lock_hash=origin.runtime_lock_hash,
+        scope_tags=origin.public_skill_tags,
+        trigger="When authoring this contract",
+        instruction="Give each cell-local scratch value its own underscored name.",
+        does_not_apply="Not for a value another cell must read.",
+        generic_example="_running = sum(values)",
+        origin_learner_id="learner-0",
+        origin_round=1,
+        origin_task_ids=[origin.task_id],
+        repair_run_ids=["run-0"],
+    )
+    return origin, draft
+
+
+def gate_state(candidate, slot=0):
+    from herd.schemas import GateState, TrialBinding
+
+    binding = TrialBinding(
+        candidate_hash=candidate.content_hash,
+        incumbent_pool_hash="pool",
+        retriever_hash="retriever",
+        model_config_hash="model",
+        runtime_lock_hash="runtime",
+        docs_snapshot_hash="docs",
+        sampler_hash="sampler",
+    )
+    return GateState(trial_id="trial", slot_id=slot, binding=binding)
+
+
+def drain(engine, state, candidate, slot=0, diagnostic=False):
+    tasks = []
+    for index in range(state.max_pairs):
+        task = engine.admission_task("e", state, candidate, slot, index, diagnostic)
+        state.task_ids.append(task.task_id)
+        tasks.append(task)
+    return tasks
+
+
+def test_admission_sampler_draws_the_whole_budget_from_the_candidate_scope(tmp_path):
+    """An unscoped uniform draw made admission arithmetically unreachable.
+
+    Twelve families share the admission partition, so a contract-scoped lesson saw
+    about five on-scope pairs in a 64-pair budget while the e-process needs eight
+    consecutive wins to reach 1/alpha. No true lesson could ever be admitted.
+    """
+    import math
+
+    from herd.task_registry import FAMILIES, TaskRegistry
+
+    registry = TaskRegistry("runtime", "docs")
+    engine = Engine(Store(tmp_path / "db"), registry, None, tmp_path, "model")
+    reference = gate_state(scoped_candidate(registry)[1])
+    needed = math.ceil(math.log(1 / reference.alpha) / math.log1p(reference.bet))
+    budget = reference.max_pairs
+    unscoped = [registry.generate(Partition.ADMISSION, n) for n in range(budget)]
+    starved = []
+
+    for seed in range(len(FAMILIES)):
+        origin, candidate = scoped_candidate(registry, seed)
+        scope = set(candidate.scope_tags)
+        tasks = drain(engine, gate_state(candidate), candidate)
+
+        assert all(task.partition == Partition.ADMISSION for task in tasks)
+        assert all(scope <= set(task.public_skill_tags) for task in tasks)
+        assert len({task.task_id for task in tasks}) == budget
+        assert origin.task_id not in {task.task_id for task in tasks}
+        assert len(tasks) >= needed
+
+        if sum(1 for task in unscoped if scope <= set(task.public_skill_tags)) < needed:
+            starved.append(origin.family_id)
+
+    assert starved  # the defect this test pins: unscoped draws cannot reach 1/alpha
+
+
+def test_admission_sampler_spreads_a_multi_family_scope_and_replays_on_resume(tmp_path):
+    from herd.task_registry import CONTRACTS, TaskRegistry
+
+    registry = TaskRegistry("runtime", "docs")
+    engine = Engine(Store(tmp_path / "db"), registry, None, tmp_path, "model")
+    shared = next(
+        n
+        for n in range(24)
+        if CONTRACTS[registry.generate(Partition.DEVELOPMENT, n).public_fixture["operation"]] == "table"
+    )
+    _, candidate = scoped_candidate(registry, shared)
+
+    first = [task.task_id for task in drain(engine, gate_state(candidate), candidate)]
+    replay = [task.task_id for task in drain(engine, gate_state(candidate), candidate)]
+    assert first == replay  # a resumed trial redraws exactly the pairs it already holds
+
+    families = {task.family_id for task in drain(engine, gate_state(candidate), candidate)}
+    assert len(families) == 2  # both families carrying the scope, not just the first hit
+
+    other = [task.task_id for task in drain(engine, gate_state(candidate, 1), candidate, slot=1)]
+    control = [
+        task.task_id
+        for task in drain(engine, gate_state(candidate, 1), candidate, slot=1, diagnostic=True)
+    ]
+    assert not set(first) & set(other)  # slots never share admission evidence
+    assert not set(other) & set(control)  # negative controls draw from a disjoint seed space
+
+
+def test_raw_memory_arm_uses_the_same_public_envelope_as_the_admitted_pool(tmp_path):
+    """Otherwise the headline measures gating plus richer formatting, not gating."""
+    import json
+
+    from herd.curator import make_pool, raw_memory, retrieve
+    from herd.schemas import LessonRevision, LessonStatus
+    from herd.task_registry import TaskRegistry
+
+    registry = TaskRegistry("runtime", "docs")
+    _, draft = scoped_candidate(registry)
+    admitted = LessonRevision(**draft.model_dump(), status=LessonStatus.ADMITTED)
+    pool = make_pool("e", 1, [admitted])
+
+    injected, _ = retrieve(pool, draft.scope_tags, "runtime")
+    assert json.loads(injected) == raw_memory([draft], draft.scope_tags)
+
+    task = registry.generate(Partition.FINAL, 100000)
+    off_scope = raw_memory([draft], ["unrelated-tag"])
+    assert off_scope == []
+    if set(draft.scope_tags) & set(task.public_skill_tags):
+        assert raw_memory([draft], task.public_skill_tags)[0].keys() == {
+            "id",
+            "when",
+            "instruction",
+            "except",
+            "example",
+        }

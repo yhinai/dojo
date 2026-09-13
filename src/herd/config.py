@@ -5,7 +5,11 @@ from pathlib import Path
 from herd.schemas import digest
 
 ROOT = Path(__file__).resolve().parents[2]
-RAW_RULE = "first verified repair per learner per round; chronological; public lesson text; tag overlap; token cap 2000; frozen-v1"
+RAW_RULE = (
+    "first verified repair per learner per round; chronological; identical public lesson "
+    "envelope to the admitted pool (id/when/instruction/except/example); tag overlap; "
+    "token cap 2000; frozen-v2"
+)
 
 
 def load_environment():

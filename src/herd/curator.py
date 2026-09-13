@@ -56,6 +56,38 @@ def curate(draft: LessonDraft, existing: list[LessonRevision], origin_tasks=None
     return LessonRevision(**draft.model_dump())
 
 
+def public_envelope(lesson) -> dict:
+    """The only shape in which a lesson is ever shown to a worker.
+
+    The admitted-pool and raw-memory arms must differ by gating alone. Formatting one
+    arm more richly than the other would fold a presentation effect into the headline
+    number, so both read this function rather than building a dict of their own.
+    """
+    return {
+        "id": lesson.lesson_id,
+        "when": lesson.trigger,
+        "instruction": lesson.instruction,
+        "except": lesson.does_not_apply,
+        "example": lesson.generic_example,
+    }
+
+
+def raw_memory(drafts, tags, budget=2000):
+    """The ungated counterfactual arm: RAW_RULE order and tag filter, pool envelope.
+
+    Same public envelope as `retrieve`, so `raw_memory` and `admitted_pool` differ only
+    in which lessons survived the gate -- not in how a surviving lesson is written down.
+    """
+    selected = []
+    for draft in drafts:
+        if not set(draft.scope_tags) & set(tags):
+            continue
+        public = public_envelope(draft)
+        if tokens(json.dumps([*selected, public])) <= budget:
+            selected.append(public)
+    return selected
+
+
 @traced("retrieve_lessons")
 def retrieve(
     pool: PoolSnapshot,
@@ -81,13 +113,7 @@ def retrieve(
             or lesson.origin_learner_id in (excluded_origins or [])
         ):
             continue
-        public = {
-            "id": lesson.lesson_id,
-            "when": lesson.trigger,
-            "instruction": lesson.instruction,
-            "except": lesson.does_not_apply,
-            "example": lesson.generic_example,
-        }
+        public = public_envelope(lesson)
         if tokens(json.dumps(selected + [public])) <= budget:
             selected.append(public)
     return json.dumps(selected), [x["id"] for x in selected]
