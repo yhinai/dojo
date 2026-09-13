@@ -95,10 +95,8 @@ def _(fetch, mo):
     except Exception as _e:  # noqa: BLE001 — surface as UI state, never crash the stage
         experiments = []
         service_error = f"Evidence service unavailable ({type(_e).__name__}). Run: herd serve"
-    if service_error:
-        mo.callout(service_error, kind="warn")
-    else:
-        mo.md("")
+    _warn = mo.callout(service_error, kind="warn") if service_error else mo.md("")
+    _warn
     return experiments, service_error
 
 
